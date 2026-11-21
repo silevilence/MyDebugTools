@@ -5,7 +5,6 @@
     <SelfContained>false</SelfContained>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Targets.fs" />
     <Compile Include="Shell.fs" />
     <Compile Include="Program.fs" />
     <ProjectReference Include="../Host/Host.fsproj" />

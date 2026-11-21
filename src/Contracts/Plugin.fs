@@ -3,6 +3,16 @@ namespace MyDebugTools.Contracts
 open System
 open Avalonia.Controls
 
+type TargetArchitecture = X86 | X64
+
+type TargetSource = DllFile of string | ProcessId of int
+
+type DebugTarget = {
+    Source: TargetSource
+    Architecture: TargetArchitecture
+    DotNetPath: string
+}
+
 type Page = {
     Id: string
     Title: string
@@ -33,6 +43,7 @@ type MonitorSession = {
 
 /// Resources owned by an activation are released together when it stops.
 type Registration =
+    abstract CurrentTarget: unit -> DebugTarget option
     abstract Page: Page -> unit
     abstract MenuPoint: MenuPoint -> unit
     abstract MenuAction: MenuExtension -> unit

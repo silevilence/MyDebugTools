@@ -6,6 +6,7 @@ open System.IO
 open System.Reflection
 open System.Runtime.Loader
 open System.Text.Json
+open System.Threading.Tasks
 open MyDebugTools.Contracts
 
 [<CLIMutable>]
@@ -40,8 +41,8 @@ type private Retired = { Id: string; Context: WeakReference; Snapshot: Directory
 
 type LocalPlugins(host: Host, settingsFile: string) =
     let locations = Dictionary<string, string>()
-    let remembered = HashSet<string>(StringComparer.OrdinalIgnoreCase)
     let retired = ResizeArray<Retired>()
+    let mutable collectedSinceCheck = 0
     let options = EnumerationOptions(RecurseSubdirectories = true, IgnoreInaccessible = false,
                                      AttributesToSkip = FileAttributes.ReparsePoint)
 
@@ -54,38 +55,45 @@ type LocalPlugins(host: Host, settingsFile: string) =
         value
 
     let sweep () =
-        let mutable collected = 0
         for item in retired.ToArray() do
             if not item.Context.IsAlive then
                 // Snapshot is exclusively created by CreateTempSubdirectory below.
                 try
                     item.Snapshot.Delete(true)
                     retired.Remove item |> ignore
-                    collected <- collected + 1
+                    collectedSinceCheck <- collectedSinceCheck + 1
                 with :? IOException -> ()
-        collected
 
-    let load folder id (registry: Registration) =
-        sweep() |> ignore
+    let copyOutput folder id =
         let info = manifest folder
         if info.Id <> id then invalidOp "目录中的插件 Id 已改变"
         let snapshot = Directory.CreateTempSubdirectory("MyDebugTools-plugin-")
+        try
+            let relativeSnapshot = Path.GetRelativePath(folder, snapshot.FullName)
+            if not (Path.IsPathRooted relativeSnapshot || relativeSnapshot.StartsWith(".." + string Path.DirectorySeparatorChar, StringComparison.Ordinal)) then
+                invalidOp "请选择插件的独立编译输出目录"
+            for file in Directory.EnumerateFiles(folder, "*", options) do
+                let target = Path.Combine(snapshot.FullName, Path.GetRelativePath(folder, file))
+                Directory.CreateDirectory(Path.GetDirectoryName target) |> ignore
+                use source = File.OpenRead file
+                use destination = File.Create target
+                source.CopyTo destination
+            snapshot, info
+        with _ ->
+            snapshot.Delete(true)
+            reraise()
+
+    let activate (snapshot: DirectoryInfo, info: PluginManifest) (registry: Registration) =
+        sweep()
         let mutable context: PluginContext option = None
         let retire () =
             match context with
             | Some alc ->
-                retired.Add { Id = id; Context = WeakReference(alc, true); Snapshot = snapshot }
+                retired.Add { Id = info.Id; Context = WeakReference(alc, true); Snapshot = snapshot }
                 alc.Unload()
                 context <- None
             | None -> snapshot.Delete(true)
         registry.Own { new IDisposable with member _.Dispose() = retire() }
-        for file in Directory.EnumerateFiles(folder, "*", options) do
-            let relative = Path.GetRelativePath(folder, file)
-            let target = Path.Combine(snapshot.FullName, relative)
-            if Path.GetFullPath(file).StartsWith(snapshot.FullName + string Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) then
-                invalidOp "请选择插件的独立编译输出目录"
-            Directory.CreateDirectory(Path.GetDirectoryName target) |> ignore
-            File.Copy(file, target)
         let entry = Path.Combine(snapshot.FullName, info.Assembly)
         let alc = PluginContext(entry)
         context <- Some alc
@@ -93,31 +101,58 @@ type LocalPlugins(host: Host, settingsFile: string) =
         let plugin = Activator.CreateInstance(assembly.GetType(info.EntryType, true)) :?> IDesktopPlugin
         plugin.Activate registry
 
-    let attach folder =
-        let info = manifest folder
+    let attach folder (info: PluginManifest) =
         host.Add {
             Id = info.Id; Title = info.Title; Core = false
-            Create = fun () -> { new IDesktopPlugin with member _.Activate reg = load folder info.Id reg }
+            Create = fun () -> { new IDesktopPlugin with member _.Activate reg = activate (copyOutput folder info.Id) reg }
         }
         locations.Add(info.Id, folder)
 
+    let savedPaths () =
+        if File.Exists settingsFile then JsonSerializer.Deserialize<string array>(File.ReadAllText settingsFile)
+        else [||]
+
     member _.Restore() = [
-        if File.Exists settingsFile then
-            for path in JsonSerializer.Deserialize<string array>(File.ReadAllText settingsFile) do
-                remembered.Add path |> ignore
-                try attach path
-                with e -> yield $"{path}：{e.Message}"
+        for path in savedPaths() do
+            try attach path (manifest path)
+            with e -> yield $"{path}：{e.Message}"
     ]
 
     member _.AddDirectory(path) =
         let folder = DirectoryInfo(path).FullName
         if locations.ContainsValue folder then invalidOp "此目录已添加"
-        attach folder
-        remembered.Add folder |> ignore
+        let info = manifest folder
+        if host.Plugins |> List.exists (fun plugin -> plugin.Id = info.Id) then invalidOp $"插件标识重复：{info.Id}"
         Directory.CreateDirectory(Path.GetDirectoryName settingsFile) |> ignore
-        let temp = settingsFile + "." + Guid.NewGuid().ToString("N")
-        File.WriteAllText(temp, JsonSerializer.Serialize(remembered))
-        File.Move(temp, settingsFile, true)
+        use settingsLock = File.Open(settingsFile + ".lock", FileMode.OpenOrCreate, FileAccess.Write, FileShare.None)
+        let saved = HashSet<string>(savedPaths(), StringComparer.OrdinalIgnoreCase)
+        if saved.Add folder then
+            let temp = settingsFile + "." + Guid.NewGuid().ToString("N")
+            try
+                File.WriteAllText(temp, JsonSerializer.Serialize(saved))
+                File.Move(temp, settingsFile, true)
+            finally
+                if File.Exists temp then File.Delete temp
+        attach folder info
+
+    // Copy privately on a worker before releasing the current version on the UI
+    // thread. Page factories and registration continue to run on the UI thread.
+    member _.EnableAsync(id, detach: unit -> unit) = task {
+        match locations.TryGetValue id with
+        | true, folder ->
+            let! snapshot, info = Task.Run(fun () -> copyOutput folder id)
+            let mutable transferred = false
+            try
+                detach()
+                host.Enable(id, fun registry ->
+                    transferred <- true
+                    activate (snapshot, info) registry)
+            finally
+                if not transferred then snapshot.Delete(true)
+        | _ ->
+            detach()
+            host.Enable id
+    }
 
     member _.Directory id =
         match locations.TryGetValue id with true, path -> Some path | _ -> None
@@ -127,5 +162,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
         GC.Collect()
         GC.WaitForPendingFinalizers()
         GC.Collect()
-        let count = sweep()
+        sweep()
+        let count = collectedSinceCheck
+        collectedSinceCheck <- 0
         count, [ for item in retired -> item.Id ]

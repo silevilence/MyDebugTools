@@ -4,7 +4,11 @@ open System
 open System.Collections.Generic
 open System.IO
 open Avalonia
+open Avalonia.Automation
+open Avalonia.Automation.Peers
+open Avalonia.Automation.Provider
 open Avalonia.Controls
+open Avalonia.Interactivity
 open Avalonia.FuncUI.DSL
 open Avalonia.FuncUI.VirtualDom
 open Avalonia.Layout
@@ -13,14 +17,47 @@ open MyDebugTools.Contracts
 open MyDebugTools.Host
 open MyDebugTools.Samples
 
+// Avalonia's stock menu peer exposes toggles only. Expose our navigation and
+// submenu operations to keyboard-independent Windows automation clients.
+type private SubmenuPeer(item: MenuItem) =
+    inherit MenuItemAutomationPeer(item)
+    interface IExpandCollapseProvider with
+        member _.Expand() = item.Open()
+        member _.Collapse() = item.Close()
+        member _.ShowsMenu = true
+        member _.ExpandCollapseState =
+            if item.IsSubMenuOpen then ExpandCollapseState.Expanded else ExpandCollapseState.Collapsed
+
+type private ActionPeer(item: MenuItem) =
+    inherit MenuItemAutomationPeer(item)
+    interface IInvokeProvider with
+        member _.Invoke() =
+            if item.IsEnabled then
+                item.RaiseEvent(RoutedEventArgs(MenuItem.ClickEvent))
+                match item.Parent with
+                | :? MenuItem as parent -> parent.Close()
+                | _ -> ()
+
+type private ShellMenuItem(title: string) =
+    inherit MenuItem(Header = title)
+    override _.StyleKeyOverride = typeof<MenuItem>
+    override item.OnCreateAutomationPeer() =
+        if item.HasSubMenu then SubmenuPeer(item) else ActionPeer(item)
+
 let private button (label: string) (run: unit -> unit) =
     Button.create [ Button.content label; Button.onClick (fun _ -> run()) ]
 
-let private targets (window: Window) () =
+let private targets (window: Window) (host: Host) () =
     let result = TextBlock(Text = "宿主 x64", TextWrapping = Media.TextWrapping.Wrap)
-    let show resolve =
-        try result.Text <- resolve() |> Targets.environment
-        with e -> result.Text <- e.Message
+    let show source =
+        try
+            let target = Targets.resolve (source())
+            host.Target <- Some target
+            let arch = if target.Architecture = X64 then "x64" else "x86"
+            result.Text <- $"目标 {arch} · {target.DotNetPath}"
+        with e ->
+            host.Target <- None
+            result.Text <- e.Message
     let pid = TextBox(PlaceholderText = "进程 ID")
     StackPanel.create [
         StackPanel.spacing 12.
@@ -29,10 +66,10 @@ let private targets (window: Window) () =
             button "选择目标 DLL" (fun () ->
                 task {
                     let! files = window.StorageProvider.OpenFilePickerAsync(FilePickerOpenOptions(Title = "选择目标 DLL"))
-                    if files.Count > 0 then show (fun () -> Targets.forFile (files[0].TryGetLocalPath()))
+                    if files.Count > 0 then show (fun () -> DllFile (files[0].TryGetLocalPath()))
                 } |> ignore)
             ContentControl.create [ ContentControl.content pid ]
-            button "选择目标进程" (fun () -> show (fun () -> Targets.forProcess (Int32.Parse pid.Text)))
+            button "选择目标进程" (fun () -> show (fun () -> ProcessId (Int32.Parse pid.Text)))
             ContentControl.create [ ContentControl.content result ]
         ]
     ] |> VirtualDom.create
@@ -45,10 +82,17 @@ type MainWindow() as window =
     let cache = Dictionary<string, Control>()
     let menu = Menu()
     let actionsMenu = Menu()
+    let navigationHandlers = ResizeArray<IDisposable>()
+    let actionHandlers = ResizeArray<IDisposable>()
+    let clearMenu (menu: Menu) (handlers: ResizeArray<IDisposable>) =
+        for handler in handlers do handler.Dispose()
+        handlers.Clear()
+        menu.Items.Clear()
     let actionResult = TextBlock(Margin = Thickness(24., 0., 24., 8.))
     let pageArea = ContentControl(Margin = Thickness 24.)
     let manager = StackPanel(Spacing = 12.)
     let feedback = TextBlock(TextWrapping = Media.TextWrapping.Wrap)
+    let mutable closeAfterChange = false
     let mutable current = "core.manager"
 
     let confirmStop target = task {
@@ -68,17 +112,17 @@ type MainWindow() as window =
 
     let rec navigate id =
         current <- id
-        actionsMenu.Items.Clear()
+        clearMenu actionsMenu actionHandlers
         actionResult.Text <- ""
         let actions = host.Actions id
         actionsMenu.IsVisible <- not actions.IsEmpty
         if not actions.IsEmpty then
-            let group = MenuItem(Header = "页面操作")
+            let group = ShellMenuItem("页面操作")
             for title, invoke in actions do
-                let item = MenuItem(Header = title)
-                item.Click.Add(fun _ ->
+                let item = ShellMenuItem(title)
+                actionHandlers.Add(item.Click.Subscribe(fun _ ->
                     try actionResult.Text <- invoke()
-                    with e -> actionResult.Text <- e.Message)
+                    with e -> actionResult.Text <- e.Message))
                 group.Items.Add item |> ignore
             actionsMenu.Items.Add group |> ignore
         let page = host.Pages |> List.find (fun p -> p.Id = id)
@@ -107,15 +151,18 @@ type MainWindow() as window =
                         | None -> return true
                     }
                     if proceed then
-                        if enabled then
-                            host.Disable id
-                            refresh() // Drop all old page instances before reopening the same IDs.
-                        if reload || not enabled then host.Enable id
+                        let detach () =
+                            if enabled then
+                                host.Disable id
+                                refresh() // Drop all old page instances before reopening the same IDs.
+                        if reload || not enabled then do! catalog.EnableAsync(id, detach)
+                        else detach()
                         feedback.Text <- ""
                 with e -> feedback.Text <- e.GetBaseException().Message
             finally
                 refresh()
                 manager.IsEnabled <- true
+                if closeAfterChange then window.Close()
         } |> ignore
 
     and addDirectory path =
@@ -130,10 +177,11 @@ type MainWindow() as window =
         let pages = host.Pages
         for id in cache.Keys |> Seq.toArray do
             if pages |> List.exists (fun p -> p.Id = id) |> not then cache.Remove id |> ignore
-        menu.Items.Clear()
+        clearMenu menu navigationHandlers
         for page in pages do
-            let item = MenuItem(Header = page.Title)
-            item.Click.Add(fun _ -> navigate page.Id)
+            let item = ShellMenuItem(page.Title)
+            let pageId = page.Id
+            navigationHandlers.Add(item.Click.Subscribe(fun _ -> navigate pageId))
             menu.Items.Add item |> ignore
         manager.Children.Clear()
         let view = StackPanel.create [
@@ -188,7 +236,7 @@ type MainWindow() as window =
                 Create = fun () -> { new IDesktopPlugin with member _.Activate reg = reg.Page page }
             }
         corePage { Id = "core.manager"; Title = "插件管理"; Create = fun () -> ScrollViewer(Content = manager) }
-        corePage { Id = "core.targets"; Title = "调试目标"; Create = targets window }
+        corePage { Id = "core.targets"; Title = "调试目标"; Create = targets window host }
         host.Add { Id = "sample.workbench"; Title = "工作台"; Core = false; Create = fun () -> Workbench() }
         host.Add { Id = "sample.actions"; Title = "工作台扩展"; Core = false; Create = fun () -> WorkbenchActions() }
         try feedback.Text <- catalog.Restore() |> String.concat Environment.NewLine
@@ -202,11 +250,15 @@ type MainWindow() as window =
         layout.Children.Add actionResult
         layout.Children.Add pageArea
         window.Content <- layout
+        window.Closing.Add(fun e ->
+            if not manager.IsEnabled then
+                e.Cancel <- true
+                closeAfterChange <- true)
         window.Closed.Add(fun _ ->
             pageArea.Content <- null
             cache.Clear()
-            menu.Items.Clear()
-            actionsMenu.Items.Clear()
+            clearMenu menu navigationHandlers
+            clearMenu actionsMenu actionHandlers
             (host :> IDisposable).Dispose()
             catalog.CheckUnloads() |> ignore)
         refresh()

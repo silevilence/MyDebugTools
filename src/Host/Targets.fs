@@ -1,4 +1,4 @@
-module MyDebugTools.Desktop.Targets
+module MyDebugTools.Host.Targets
 
 open System
 open System.Diagnostics
@@ -6,8 +6,9 @@ open System.IO
 open System.Reflection.PortableExecutable
 open System.Runtime.InteropServices
 open Microsoft.Win32
+open Microsoft.Win32.SafeHandles
 
-type Architecture = X86 | X64
+open MyDebugTools.Contracts
 
 let private architecture = function
     | Machine.I386 -> X86
@@ -17,21 +18,31 @@ let private architecture = function
 let forFile path =
     use stream = File.OpenRead path
     use image = new PEReader(stream)
-    architecture image.PEHeaders.CoffHeader.Machine
+    let headers = image.PEHeaders
+    match headers.CoffHeader.Machine, headers.CorHeader with
+    | Machine.I386, clr when not (isNull clr) && clr.Flags.HasFlag(CorFlags.ILOnly) && not (clr.Flags.HasFlag(CorFlags.Requires32Bit)) -> X64
+    | machine, _ -> architecture machine
 
 [<DllImport("kernel32.dll", SetLastError = true)>]
-extern bool private IsWow64Process2(nativeint handle, uint16& processMachine, uint16& nativeMachine)
+extern bool private IsWow64Process2(SafeProcessHandle handle, uint16& processMachine, uint16& nativeMachine)
+
+[<DllImport("kernel32.dll", SetLastError = true)>]
+extern SafeProcessHandle private OpenProcess(uint32 access, bool inheritHandle, int pid)
 
 let forProcess pid =
-    use proc = Process.GetProcessById pid
+    use handle = OpenProcess(0x1000u, false, pid) // PROCESS_QUERY_LIMITED_INFORMATION
     let mutable processMachine = 0us
     let mutable nativeMachine = 0us
-    if not (IsWow64Process2(proc.Handle, &processMachine, &nativeMachine)) then
+    if handle.IsInvalid || not (IsWow64Process2(handle, &processMachine, &nativeMachine)) then
         raise (ComponentModel.Win32Exception(Marshal.GetLastWin32Error()))
     let machine = if processMachine = 0us then nativeMachine else processMachine
     architecture (LanguagePrimitives.EnumOfValue machine)
 
-let environment arch =
+let resolve source =
+    let arch =
+        match source with
+        | DllFile path -> forFile path
+        | ProcessId pid -> forProcess pid
     let name, programFiles =
         match arch with
         | X86 -> "x86", Environment.SpecialFolder.ProgramFilesX86
@@ -48,5 +59,5 @@ let environment arch =
     let available =
         File.Exists executable && Directory.Exists runtime &&
         (Directory.EnumerateDirectories(runtime, "10.*") |> Seq.isEmpty |> not)
-    if available then $"目标 {name} · {executable}"
-    else $"目标 {name} · 缺少 .NET 10 {name} 运行时"
+    if not available then invalidOp $"目标 {name} · 缺少 .NET 10 {name} 运行时"
+    { Source = source; Architecture = arch; DotNetPath = executable }

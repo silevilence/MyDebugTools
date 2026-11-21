@@ -15,6 +15,7 @@ type Plugin = {
 }
 
 type Host() =
+    let mutable target: DebugTarget option = None
     let root = Context.Create()
     let plugins = ResizeArray<Plugin>()
     let active = Dictionary<string, PluginHandle>()
@@ -25,6 +26,8 @@ type Host() =
     let extensions = ResizeArray<string * MenuExtension>()
     let compatible (point: MenuPoint) (action: MenuExtension) =
         point.Version >= action.MinVersion && point.Version <= action.MaxVersion
+
+    member _.Target with get() = target and set value = target <- value
 
     member _.Monitor id = match monitors.TryGetValue id with true, session -> Some session | _ -> None
 
@@ -52,7 +55,7 @@ type Host() =
     member _.Pages = pages.Values |> Seq.toList
     member _.Enabled id = active.ContainsKey id
 
-    member _.Enable(id) =
+    member _.Enable(id, ?activate: Registration -> unit) =
         if not (active.ContainsKey id) then
             let plugin = plugins |> Seq.find (fun p -> p.Id = id)
             // Finish registration before publishing any of this plugin's pages.
@@ -62,10 +65,16 @@ type Host() =
             let mutable monitor = None
             let resources = Stack<IDisposable>()
             let release () =
-                while resources.Count > 0 do resources.Pop().Dispose()
+                let errors = ResizeArray<exn>()
+                while resources.Count > 0 do
+                    try resources.Pop().Dispose()
+                    with e -> errors.Add e
+                if errors.Count > 0 then raise (AggregateException(errors))
             try
-                plugin.Create().Activate {
+                let register = defaultArg activate (fun reg -> plugin.Create().Activate reg)
+                register {
                     new Registration with
+                        member _.CurrentTarget() = target
                         member _.Page page =
                             if pages.ContainsKey page.Id || Seq.exists (fun (p: Page) -> p.Id = page.Id) additions then
                                 invalidOp $"页面标识重复：{page.Id}"

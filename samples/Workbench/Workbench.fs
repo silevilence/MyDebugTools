@@ -9,10 +9,12 @@ type Workbench() =
     interface IDesktopPlugin with
         member _.Activate registry =
             let options = [| "请求 A"; "请求 B" |]
-            let mutable selected = options[0]
+            let selector = lazy (ComboBox(ItemsSource = options, SelectedIndex = 0))
+            let selected () =
+                if selector.IsValueCreated then string selector.Value.SelectedItem else options[0]
             registry.MenuPoint {
                 PageId = "sample.workbench"; PointId = "selection"; Version = 1
-                Selection = fun () -> selected
+                Selection = selected
             }
             registry.MenuPoint {
                 PageId = "sample.workbench"; PointId = "summary"
@@ -21,7 +23,7 @@ type Workbench() =
 #else
                 Version = 1
 #endif
-                Selection = fun () -> selected
+                Selection = selected
             }
             registry.Page {
                 Id = "sample.workbench"
@@ -31,11 +33,7 @@ type Workbench() =
                         StackPanel.spacing 10.
                         StackPanel.children [
                             TextBlock.create [ TextBlock.text "工作台"; TextBlock.fontSize 24. ]
-                            ComboBox.create [
-                                ComboBox.dataItems options
-                                ComboBox.selectedIndex 0
-                                ComboBox.onSelectedIndexChanged (fun index -> if index >= 0 then selected <- options[index])
-                            ]
+                            ContentControl.create [ ContentControl.content selector.Value ]
                             TextBlock.create [ TextBlock.text "草稿" ]
                             TextBox.create [ TextBox.name "Draft"; TextBox.placeHolderText "输入待处理的内容" ]
                         ]

@@ -3,6 +3,7 @@
     <AssemblyName>MyDebugTools.Host</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Targets.fs" />
     <Compile Include="Host.fs" />
     <Compile Include="LocalPlugins.fs" />
     <ProjectReference Include="../Contracts/Contracts.fsproj" />

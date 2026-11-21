@@ -1,10 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Lifecycle.fs" />
     <Compile Include="Extensions.fs" />
     <Compile Include="Reload.fs" />
     <Compile Include="Monitoring.fs" />
+    <Compile Include="Targets.fs" />
     <Compile Include="VersionMismatch.fs" />
+    <ProjectReference Include="../../samples/CompanyTools/CompanyTools.fsproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="../../samples/WorkbenchActions/WorkbenchActions.fsproj" />
     <ProjectReference Include="../../src/Host/Host.fsproj" />
     <ProjectReference Include="../../samples/Workbench/Workbench.fsproj" />
