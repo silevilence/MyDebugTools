@@ -21,7 +21,7 @@ module private View =
         control.Click.Add(fun _ -> handler())
         control
 
-    let create (sessions: ResizeArray<CaptureSession>) (reg: Registration) () =
+    let create () =
         let panel = StackPanel(Spacing = 8.)
         let query = input "搜索 SDK 函数"
         let dll = input "监控 DLL 路径"
@@ -31,6 +31,7 @@ module private View =
         let results = ListBox(Height = 130.)
         let details = TextBlock(TextWrapping = TextWrapping.Wrap)
         let chosen = ListBox(Height = 80.)
+        AutomationProperties.SetAutomationId(chosen, "chosen-functions")
         let selected = ResizeArray<MonitorFunction>()
         let add = button "加入监控" (fun () ->
             match results.SelectedItem with
@@ -76,11 +77,15 @@ module private View =
         let calls = ListBox(Height = 160.)
         let detail = TextBlock(TextWrapping = TextWrapping.Wrap)
         let state = TextBlock(TextWrapping = TextWrapping.Wrap)
+        AutomationProperties.SetAutomationId(state, "capture-status")
+        AutomationProperties.SetAutomationId(detail, "call-detail")
+        let mutable lastView = None
         let showDetail () =
             detail.Text <- match calls.SelectedItem with :? CapturedCall as c -> c.Details | _ -> ""
         let refresh () =
             match history.SelectedItem with
-            | :? CaptureSession as s ->
+            | :? CaptureSession as s when lastView <> Some (s, s.Revision) ->
+                lastView <- Some (s, s.Revision)
                 let old = calls.SelectedIndex
                 let rows = s.Records()
                 calls.ItemsSource <- rows
@@ -94,8 +99,8 @@ module private View =
         let track beginCapture =
             try
                 let s = beginCapture()
-                sessions.Add s
-                history.ItemsSource <- sessions.ToArray()
+                CaptureHistory.Add s
+                history.ItemsSource <- CaptureHistory.Sessions()
                 history.SelectedItem <- s
                 message.Text <- ""
             with e -> message.Text <- e.Message
@@ -110,13 +115,12 @@ module private View =
             match history.SelectedItem with
             | :? CaptureSession as s -> s.StopAsync() |> ignore
             | _ -> ())
-        history.ItemsSource <- sessions.ToArray()
-        history.SelectedIndex <- sessions.Count - 1
+        history.ItemsSource <- CaptureHistory.Sessions()
+        history.SelectedIndex <- history.ItemCount - 1
         let timer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 400.)
         timer.Tick.Add(fun _ -> refresh())
         panel.AttachedToVisualTree.Add(fun _ -> timer.Start())
         panel.DetachedFromVisualTree.Add(fun _ -> timer.Stop())
-        reg.Own { new IDisposable with member _.Dispose() = timer.Stop() }
         let controls: Control list =
             [ TextBlock(Text = "API 监控", FontSize = 24.); dll; load; sdk; query; results; details; add
               TextBlock(Text = "监控函数"); chosen; remove; exe; args; start; pid; attach; message
@@ -127,8 +131,7 @@ module private View =
 type Plugin() =
     interface IDesktopPlugin with
         member _.Activate reg =
-            let sessions = ResizeArray<CaptureSession>()
-            let active () = sessions |> Seq.filter (fun s -> not s.Completion.IsCompleted) |> Seq.toArray
+            let active () = CaptureHistory.Sessions() |> Array.filter (fun s -> not s.Completion.IsCompleted)
             let stop () = active() |> Array.map (fun s -> s.StopAsync()) |> Task.WhenAll
             reg.Monitor { Target = fun () ->
                               match active() with
@@ -136,4 +139,4 @@ type Plugin() =
                               | all -> Some (all |> Array.map string |> String.concat "、")
                           Stop = stop }
             reg.Own { new IDisposable with member _.Dispose() = stop().GetAwaiter().GetResult() }
-            reg.Page { Id = "api.monitor"; Title = "API 监控"; Create = View.create sessions reg }
+            reg.Page { Id = "api.monitor"; Title = "API 监控"; Create = View.create }

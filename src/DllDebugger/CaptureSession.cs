@@ -21,6 +21,7 @@ public sealed class CaptureSession
     readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     readonly int capacity;
     bool stopping;
+    int revision;
     string status = "正在连接";
     public string Target { get; }
     public string Architecture { get; }
@@ -30,6 +31,7 @@ public sealed class CaptureSession
     public Task Ready => ready.Task;
     public Task Completion { get; }
     public string Status { get { lock (gate) return status; } }
+    public int Revision { get { lock (gate) return revision; } }
     public CapturedCall[] Records() { lock (gate) return records.ToArray(); }
     public override string ToString() => $"{Target} · PID {Pid} · {Architecture} · {Effective:HH:mm:ss}";
 
@@ -127,6 +129,7 @@ public sealed class CaptureSession
                 var c = line.Split('\t');
                 lock (gate)
                 {
+                    revision++;
                     if (c[0] == "ready") {
                         Pid = int.Parse(c[1]);
                         Effective = DateTimeOffset.FromFileTime(long.Parse(c[2]));
@@ -169,6 +172,7 @@ public sealed class CaptureSession
                     records[index] = records[index] with { State = "不完整", Result = "未知" };
                 }
                 status = error ?? "已结束";
+                revision++;
                 ready.TrySetException(new InvalidOperationException(error ?? "目标在生效前退出"));
             }
             worker.Dispose();

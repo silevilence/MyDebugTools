@@ -1,6 +1,6 @@
 # Run from the repository root with PowerShell 7 after publishing src/Desktop.
 [CmdletBinding()]
-param([string]$Publish = 'artifacts/publish', [string]$DllFixtures = 'tests/DllDebugger.Tests/bin/Release/net10.0', [switch]$DllOnly)
+param([string]$Publish = 'artifacts/publish', [string]$DllFixtures = 'tests/DllDebugger.Tests/bin/Release/net10.0', [switch]$DllOnly, [switch]$MonitorOnly)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
@@ -169,16 +169,12 @@ function Check-DllWorkbench {
     }
 }
 
-try {
-    if (!$DllOnly) {
-        Build-Sample CompanyTools $companyDir '-p:SampleRevision=1'
-        Build-Sample Workbench $providerDir '-p:SummaryVersion=1'
-    }
+function Start-Desktop {
     $start = [Diagnostics.ProcessStartInfo]::new($exe)
     $start.UseShellExecute = $false
     $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
     $start.Environment['LOCALAPPDATA'] = $work.FullName
-    $appProcess = [Diagnostics.Process]::Start($start)
+    $script:appProcess = [Diagnostics.Process]::Start($start)
     for ($attempt = 0; $attempt -lt 80; $attempt++) {
         if ($appProcess.HasExited) { throw "App exited: $($appProcess.ExitCode)" }
         $appProcess.Refresh()
@@ -186,7 +182,20 @@ try {
         if ($hwnd -ne [IntPtr]::Zero) { break }
         Start-Sleep -Milliseconds 100
     }
-    $window = [Windows.Automation.AutomationElement]::FromHandle($hwnd)
+    $script:window = [Windows.Automation.AutomationElement]::FromHandle($hwnd)
+}
+
+try {
+    if (!$DllOnly -and !$MonitorOnly) {
+        Build-Sample CompanyTools $companyDir '-p:SampleRevision=1'
+        Build-Sample Workbench $providerDir '-p:SummaryVersion=1'
+    }
+    Start-Desktop
+    if ($MonitorOnly) {
+        . "$PSScriptRoot/ApiMonitor.ps1"
+        Check-ApiMonitor
+        return
+    }
     Check-DllWorkbench
     if ($DllOnly) { return }
     Open-Manager
