@@ -11,6 +11,9 @@
     <Compile Include="Shell.fs" />
     <Compile Include="Program.fs" />
     <ProjectReference Include="../Host/Host.fsproj" />
+    <ProjectReference Include="../DllDependencies/DllDependencies.fsproj" ReferenceOutputAssembly="false" />
+    <Content Include="../DllDependencies/bin/$(Configuration)/$(TargetFramework)/DllDependencies.dll;../DllDependencies/plugin.json"
+             Link="plugins/DllDependencies/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="../ApiMonitor/ApiMonitor.fsproj" ReferenceOutputAssembly="false" />
     <Content Include="../ApiMonitor/bin/$(Configuration)/$(TargetFramework)/ApiMonitor.dll;../ApiMonitor/plugin.json"
              Link="plugins/ApiMonitor/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

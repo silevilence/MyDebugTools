@@ -19,6 +19,17 @@ type Page = {
     Create: unit -> Control
 }
 
+type DllTabView = {
+    Content: Control
+    OpenFile: string -> unit
+    Close: unit -> unit
+}
+
+type DllTab = {
+    Title: string
+    Create: unit -> DllTabView
+}
+
 /// A menu action receives the provider's current selection at invocation time.
 type MenuPoint = {
     PageId: string
@@ -45,6 +56,7 @@ type MonitorSession = {
 type Registration =
     abstract CurrentTarget: unit -> DebugTarget option
     abstract Page: Page -> unit
+    abstract DllTab: DllTab -> unit
     abstract MenuPoint: MenuPoint -> unit
     abstract MenuAction: MenuExtension -> unit
     abstract Monitor: MonitorSession -> unit

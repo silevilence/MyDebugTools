@@ -20,6 +20,8 @@ type Host() =
     let plugins = ResizeArray<Plugin>()
     let active = Dictionary<string, PluginHandle>()
     let pages = Dictionary<string, Page>()
+    let dllTabs = ResizeArray<string * DllTab>()
+    let tabsChanged = Event<unit>()
 
     let monitors = Dictionary<string, MonitorSession>()
     let points = Dictionary<string * string, MenuPoint>()
@@ -28,6 +30,8 @@ type Host() =
         point.Version >= action.MinVersion && point.Version <= action.MaxVersion
 
     member _.Target with get() = target and set value = target <- value
+    member _.DllTabs = dllTabs |> Seq.toList
+    member _.DllTabsChanged = tabsChanged.Publish
 
     member _.Monitor id = match monitors.TryGetValue id with true, session -> Some session | _ -> None
 
@@ -62,6 +66,7 @@ type Host() =
             let additions = ResizeArray<Page>()
             let declared = ResizeArray<MenuPoint>()
             let actions = ResizeArray<MenuExtension>()
+            let tabs = ResizeArray<DllTab>()
             let mutable monitor = None
             let resources = Stack<IDisposable>()
             let release () =
@@ -75,6 +80,7 @@ type Host() =
                 register {
                     new Registration with
                         member _.CurrentTarget() = target
+                        member _.DllTab tab = tabs.Add tab
                         member _.Page page =
                             if pages.ContainsKey page.Id || Seq.exists (fun (p: Page) -> p.Id = page.Id) additions then
                                 invalidOp $"页面标识重复：{page.Id}"
@@ -100,10 +106,12 @@ type Host() =
                 for page in additions do pages.Add(page.Id, page)
                 for point in declared do points.Add((point.PageId, point.PointId), point)
                 for action in actions do extensions.Add(id, action)
+                for tab in tabs do dllTabs.Add(id, tab)
                 monitor |> Option.iter (fun session -> monitors.Add(id, session))
                 resources.Push { new IDisposable with
                                     member _.Dispose() =
                                         monitors.Remove id |> ignore
+                                        dllTabs.RemoveAll(fun (owner, _) -> owner = id) |> ignore
                                         for point in declared do points.Remove((point.PageId, point.PointId)) |> ignore
                                         extensions.RemoveAll(fun (owner, _) -> owner = id) |> ignore
                                         for page in additions do pages.Remove page.Id |> ignore }
@@ -111,6 +119,7 @@ type Host() =
             with _ ->
                 release()
                 reraise()
+            if tabs.Count > 0 then tabsChanged.Trigger()
 
     member this.Add(plugin) =
         if plugins |> Seq.exists (fun p -> p.Id = plugin.Id) then invalidOp $"插件标识重复：{plugin.Id}"
@@ -123,8 +132,10 @@ type Host() =
         if plugins |> Seq.exists (fun p -> p.Id = id && p.Core) then invalidOp "核心插件必须保持启用"
         match active.TryGetValue id with
         | true, handle ->
+            let hadTabs = dllTabs.Exists(fun (owner, _) -> owner = id)
             Task.Run(fun () -> handle.DisposeAsync().AsTask()).GetAwaiter().GetResult()
             active.Remove id |> ignore
+            if hadTabs then tabsChanged.Trigger()
         | _ -> ()
 
     interface IDisposable with

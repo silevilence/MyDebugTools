@@ -19,7 +19,7 @@ let private row (controls: Control list) =
     for c in controls do panel.Children.Add c
     panel
 
-let plugin (window: Window) =
+let plugin (window: Window) (host: Host) =
     { new IDesktopPlugin with
         member _.Activate registry =
             let mutable session: CallSession option = None
@@ -31,6 +31,9 @@ let plugin (window: Window) =
                 Id = "dll.debugger"; Title = "DLL 工作台"
                 Create = fun () ->
                     let panel = StackPanel(Spacing = 8.)
+                    let header = StackPanel(Spacing = 8.)
+                    let tabs = TabControl()
+                    let mounted = ResizeArray<DllTab * TabItem * DllTabView>()
                     let path = TextBox(PlaceholderText = "DLL 文件路径")
                     let status = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
                     let exports = ListBox(Height = 160.)
@@ -75,12 +78,13 @@ let plugin (window: Window) =
                                 entry.Text <- loaded.Exports[0].Entry
                                 selectEntry()
                             status.Text <- $"{loaded.Path} · {loaded.Architecture} · {loaded.Exports.Count} 项导出 · {loaded.Symbols.Status}"
+                            for _, _, view in mounted do view.OpenFile loaded.Path
                         with e ->
                             let active = image |> Option.map _.Path |> Option.defaultValue "无"
                             status.Text <- $"打开失败 · {e.Message}　当前 DLL · {active}"
-                    panel.Children.Add(TextBlock(Text = "DLL 工作台", FontSize = 24.))
-                    panel.Children.Add path
-                    panel.Children.Add(row [
+                    header.Children.Add(TextBlock(Text = "DLL 工作台", FontSize = 24.))
+                    header.Children.Add path
+                    header.Children.Add(row [
                         button "打开 DLL" (fun () -> openFile path.Text)
                         button "浏览文件…" (fun () ->
                             task {
@@ -88,7 +92,7 @@ let plugin (window: Window) =
                                 if files.Count > 0 then openFile (files[0].TryGetLocalPath())
                             } |> ignore)
                     ])
-                    panel.Children.Add status
+                    header.Children.Add status
                     panel.Children.Add(TextBlock(Text = "导出名　序号　相对地址　性质"))
                     panel.Children.Add exports
                     panel.Children.Add(TextBlock(Text = "仅有导出表时，返回类型和参数未知。"))
@@ -140,5 +144,31 @@ let plugin (window: Window) =
                     ])
                     panel.Children.Add output
                     panel.Children.Add bindings.Control
-                    ScrollViewer(Content = panel)
+                    tabs.Items.Add(TabItem(Header = "导出", Content = ScrollViewer(Content = panel))) |> ignore
+                    tabs.SelectedIndex <- 0
+                    let syncTabs () =
+                        let wanted = host.DllTabs |> List.map snd
+                        for tab, item, view in mounted.ToArray() do
+                            if wanted |> List.exists (fun t -> obj.ReferenceEquals(t, tab)) |> not then
+                                if item.IsSelected then tabs.SelectedIndex <- 0
+                                tabs.Items.Remove item |> ignore
+                                mounted.Remove((tab, item, view)) |> ignore
+                                view.Close()
+                        for tab in wanted do
+                            if mounted.Exists(fun (t, _, _) -> obj.ReferenceEquals(t, tab)) |> not then
+                                let view = tab.Create()
+                                let item = TabItem(Header = tab.Title, Content = view.Content)
+                                mounted.Add(tab, item, view)
+                                tabs.Items.Add item |> ignore
+                                image |> Option.iter (fun dll -> view.OpenFile dll.Path)
+                    registry.Own(host.DllTabsChanged.Subscribe(fun () -> syncTabs()))
+                    registry.Own { new IDisposable with
+                                       member _.Dispose() =
+                                           for _, _, view in mounted do view.Close() }
+                    syncTabs()
+                    let layout = DockPanel()
+                    DockPanel.SetDock(header, Dock.Top)
+                    layout.Children.Add header
+                    layout.Children.Add tabs
+                    layout
             } }

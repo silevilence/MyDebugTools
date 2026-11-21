@@ -10,6 +10,10 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
     <Compile Remove="fixtures/**/*.cs" />
   </ItemGroup>
+  <Target Name="DependencyFixtures" BeforeTargets="CopyFilesToOutputDirectory" Inputs="fixtures/Dependencies.ps1"
+          Outputs="$(OutDir)dependencies/Root.dll;$(OutDir)dependencies/LeftBranch.dll;$(OutDir)dependencies/Later.dll;$(OutDir)dependencies/SharedLeaf.dll">
+    <Exec Command="pwsh -NoProfile -File fixtures/Dependencies.ps1 &quot;$(OutDir)dependencies&quot;" />
+  </Target>
   <Target Name="NativeFixtures" BeforeTargets="CopyFilesToOutputDirectory" Inputs="fixture.c;fixture.def;monitor-target.c;fixtures/InteractiveTarget.cs;BuildFixtures.ps1" Outputs="$(OutDir)x86/interactive.exe;$(OutDir)x64/interactive.exe;$(OutDir)x86/monitor-target.exe;$(OutDir)x64/monitor-target.exe;$(OutDir)x86/fixture.dll;$(OutDir)x64/fixture.dll;$(OutDir)x86/fixture.pdb;$(OutDir)x64/fixture.pdb;$(OutDir)x86/reject.dll;$(OutDir)x64/reject.dll;$(OutDir)x86/public.dll;$(OutDir)x64/public.dll;$(OutDir)x86/public.pdb;$(OutDir)x64/public.pdb">
     <Exec Command="pwsh -NoProfile -File BuildFixtures.ps1 &quot;$(OutDir).&quot;" />
   </Target>
