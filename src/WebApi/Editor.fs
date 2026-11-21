@@ -51,23 +51,60 @@ let row (controls: Control list) =
 let tab title (content: Control) =
     TabItem(Header = title, Content = ScrollViewer(Content = content, Padding = Thickness(2., 8.)))
 
-type Parameters(events: Events) =
-    let panel = StackPanel(Spacing = 6.)
-    let entries = ResizeArray<unit -> Argument>()
-    let add () =
-        let name = field "参数名"
-        let actual = field "实参"
-        let location = choice "位置" [| "查询"; "路径"; "请求头" |]
-        name.Width <- 140.
-        actual.Width <- 180.
-        let read () = { Name = (value name).Trim(); Location = string location.SelectedItem; Value = value actual }
-        let line = row [ location; name; actual ]
-        let remove = button events "移除" (fun () -> entries.Remove read |> ignore; panel.Children.Remove line |> ignore)
-        line.Children.Add remove
+type Parameters() =
+    let panel = StackPanel(Spacing = 10.)
+    let entries = ResizeArray<(unit -> Parameter * Argument) * Events>()
+    let clear () =
+        for _, handlers in entries do (handlers :> IDisposable).Dispose()
+        entries.Clear()
+
+    let add (p: Parameter) =
+        let handlers = new Events()
+        let input title width text =
+            let box = field title
+            box.Width <- width
+            box.Text <- text
+            box
+        let name = input "参数名" 130. p.Name
+        let actual = input "实参" 160. p.DefaultValue
+        let defaultValue = input "默认值" 140. p.DefaultValue
+        let typeName = input "类型" 100. p.TypeName
+        let description = input "说明" 180. p.Description
+        let required = CheckBox(Content = "必填", IsChecked = Nullable p.Required)
+        let location = choice "位置" [| "查询"; "路径"; "请求头"; "正文" |]
+        location.SelectedItem <- p.Location
+        let read () =
+            let key = (value name).Trim()
+            if key = "" then invalidOp "请填写参数名或移除空行"
+            let position = string location.SelectedItem
+            { Name = key; Location = position; TypeName = value typeName; Required = required.IsChecked.GetValueOrDefault()
+              Description = value description; DefaultValue = value defaultValue },
+            { Name = key; Location = position; Value = value actual }
+        let line = stack [
+            row [ location; name; TextBlock(Text = "实参"); actual ]
+            Expander(Header = "参数定义", Content = row [
+                TextBlock(Text = "默认值"); defaultValue; typeName; required; description ])
+        ]
+        let entry = read, handlers
+        let remove () =
+            entries.Remove entry |> ignore
+            panel.Children.Remove line |> ignore
+            (handlers :> IDisposable).Dispose()
+        line.Children.Add(button handlers "移除参数" remove)
         panel.Children.Add line
-        entries.Add read
-    member _.Content = stack [ TextBlock(Text = "路径参数使用 {参数名} 占位"); panel; button events "添加参数" add ]
+        entries.Add entry
+    member _.Content(events) =
+        stack [ TextBlock(Text = "路径参数使用 {参数名} 占位"); panel
+                button events "添加参数" (fun () ->
+                    add { Name = ""; Location = "查询"; TypeName = "string"; Required = false; Description = ""; DefaultValue = "" }) ]
+    member _.Load(items) =
+        clear()
+        panel.Children.Clear()
+        Array.iter add items
+    member _.Definitions() = entries |> Seq.map (fun (read, _) -> fst (read())) |> Seq.toArray
     member _.Read() =
-        entries |> Seq.map (fun read -> read()) |> Seq.map (fun arg ->
-            if arg.Name = "" then invalidOp "请填写参数名或移除空行"
+        entries |> Seq.map (fun (read, _) ->
+            let p, arg = read()
+            if p.Required && arg.Value = "" then invalidOp $"请填写必填参数 {p.Name}"
             arg) |> Seq.toArray
+    interface IDisposable with member _.Dispose() = clear()

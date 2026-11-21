@@ -32,7 +32,9 @@ type Plugin() =
                     let timeout = field "超时秒数"
                     timeout.Text <- "30"
                     timeout.Width <- 64.
-                    let parameters = Parameters(events)
+                    let parameters = new Parameters()
+                    registry.Own parameters
+                    let body = BodyEditor(events)
                     let status = TextBlock(TextWrapping = TextWrapping.Wrap)
                     let headers = multiline "响应头"
                     let raw = multiline "响应原文"
@@ -40,7 +42,20 @@ type Plugin() =
                     raw.IsReadOnly <- true
                     let response = tab "响应" (stack [ TextBlock(Text = "响应头"); headers; TextBlock(Text = "原文"); raw ])
                     let tabs = TabControl()
-                    tabs.Items.Add(tab "参数" parameters.Content) |> ignore
+                    let paramsTab = tab "参数" (parameters.Content(events))
+                    let capture () =
+                        { Library.blank with Method = value methodBox; Url = value url
+                                             Parameters = parameters.Definitions(); Body = body.Read() }
+                    let apply (d: Definition) =
+                        methodBox.Text <- d.Method
+                        url.Text <- d.Url
+                        parameters.Load d.Parameters
+                        body.Load d.Body
+                        tabs.SelectedItem <- paramsTab
+                    let definitions = Definitions(events, capture, apply, fun msg -> status.Text <- msg)
+                    tabs.Items.Add(paramsTab) |> ignore
+                    tabs.Items.Add(tab "正文" body.Content) |> ignore
+                    tabs.Items.Add(tab "接口定义" definitions.Content) |> ignore
                     tabs.Items.Add response |> ignore
                     tabs.SelectedIndex <- 0
                     let mutable current: CancellationTokenSource option = None
@@ -49,7 +64,7 @@ type Plugin() =
                     cancel.IsEnabled <- false
                     let send () = task {
                         try
-                            use request = Http.prepare (value methodBox) (value url) (parameters.Read())
+                            use request = Http.prepareBody (value methodBox) (value url) (parameters.Read()) (body.Read())
                             let seconds =
                                 match Int32.TryParse(value timeout) with
                                 | true, s when s >= 1 && s <= 86400 -> s

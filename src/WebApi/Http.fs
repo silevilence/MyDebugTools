@@ -22,7 +22,7 @@ module Http =
         new HttpClient(new HttpClientHandler(AllowAutoRedirect = false, UseCookies = false),
                        Timeout = Timeout.InfiniteTimeSpan)
 
-    let prepare (methodName: string) (url: string) (args: Argument array) =
+    let prepareBody (methodName: string) (url: string) (args: Argument array) (body: Body) =
         let verb = HttpMethod(methodName.Trim())
         let mutable address = url.Trim()
         let query = ResizeArray<string>()
@@ -45,12 +45,25 @@ module Http =
         })
         let request = new HttpRequestMessage(verb, target.Uri)
         try
+            if body.Kind = "原始文本" then
+                let mutable raw = body.Text
+                for arg in args do
+                    if arg.Location = "正文" then raw <- raw.Replace("{" + arg.Name + "}", arg.Value)
+                let content = new StringContent(raw, System.Text.Encoding.UTF8)
+                request.Content <- content
+                content.Headers.ContentType <- Headers.MediaTypeHeaderValue.Parse(body.MediaType)
             for arg in args do
-                if arg.Location = "请求头" then request.Headers.Add(arg.Name, arg.Value)
+                if arg.Location = "请求头" then
+                    try request.Headers.Add(arg.Name, arg.Value)
+                    with :? InvalidOperationException when not (isNull request.Content) ->
+                        request.Content.Headers.Remove(arg.Name) |> ignore
+                        request.Content.Headers.Add(arg.Name, arg.Value)
             request
         with _ ->
             request.Dispose()
             reraise()
+
+    let prepare methodName url args = prepareBody methodName url args Library.emptyBody
 
     let send (client: HttpClient) (request: HttpRequestMessage) (timeout: TimeSpan) (cancel: CancellationToken) = task {
         use deadline = CancellationTokenSource.CreateLinkedTokenSource(cancel)
