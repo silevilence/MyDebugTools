@@ -3,3 +3,9 @@ add @3
 hidden @4 NONAME
 data @5 DATA
 forwarded=KERNEL32.GetTickCount @6
+twice
+open_handle
+use_handle
+close_handle
+count
+spin

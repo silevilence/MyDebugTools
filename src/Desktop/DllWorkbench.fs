@@ -5,6 +5,7 @@ open Avalonia.Controls
 open Avalonia.Layout
 open Avalonia.Platform.Storage
 open MyDebugTools.Contracts
+open MyDebugTools.Host
 open MyDebugTools.DllDebugger
 
 let private button title run =
@@ -20,6 +21,11 @@ let private row (controls: Control list) =
 let plugin (window: Window) =
     { new IDesktopPlugin with
         member _.Activate registry =
+            let mutable session: CallSession option = None
+            let restart () =
+                session |> Option.iter (fun s -> s.Dispose())
+                session <- None
+            registry.Own { new IDisposable with member _.Dispose() = restart() }
             registry.Page {
                 Id = "dll.debugger"; Title = "DLL 工作台"
                 Create = fun () ->
@@ -49,6 +55,7 @@ let plugin (window: Window) =
                     let openFile file =
                         try
                             let loaded = DllImage.Open file
+                            restart()
                             image <- Some loaded
                             path.Text <- loaded.Path
                             exports.ItemsSource <- loaded.Exports
@@ -85,5 +92,37 @@ let plugin (window: Window) =
                             selectEntry()
                         with e -> signatureStatus.Text <- e.Message))
                     panel.Children.Add signatureStatus
+                    let arguments = TextBox(Text = "{}", AcceptsReturn = true)
+                    let output = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
+                    panel.Children.Add(TextBlock(Text = "调用参数（JSON 对象，如 {\"a\":2,\"b\":3}）"))
+                    panel.Children.Add arguments
+                    let invoke () =
+                        task {
+                            try
+                                panel.IsEnabled <- false
+                                let dll = image |> Option.defaultWith (fun () -> invalidOp "请先打开 DLL。")
+                                let draft = editor.Read entry.Text
+                                draft.Validate()
+                                let saved = store.Find(dll, entry.Text)
+                                if not saved.Confirmed || Seq.toArray (saved.Signature.Values()) <> Seq.toArray (draft.Values()) then
+                                    invalidOp "请先确认并保存当前签名。"
+                                let worker =
+                                    match session with
+                                    | Some active -> active
+                                    | None ->
+                                        let target = Targets.resolve (DllFile dll.Path)
+                                        let active = new CallSession(dll, target.DotNetPath)
+                                        session <- Some active
+                                        active
+                                let! result = worker.Invoke(saved.Signature, arguments.Text)
+                                output.Text <- result.Display()
+                            with e -> output.Text <- e.Message
+                            panel.IsEnabled <- true
+                        } |> ignore
+                    panel.Children.Add(row [
+                        button "调用函数" invoke
+                        button "重新开始会话" (fun () -> restart(); output.Text <- "已重新开始会话。")
+                    ])
+                    panel.Children.Add output
                     ScrollViewer(Content = panel)
             } }
