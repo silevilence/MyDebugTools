@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -37,8 +38,9 @@ static void check(HRESULT hr, const char* operation) {
 struct Function {
     std::filesystem::path image;
     Word rva;
-    std::wstring widths; // argument slots, 4 or 8 bytes; '?' suppresses decoding
+    std::wstring widths; // x86 stack slot sizes
     bool result64;
+    int calleePop;
     Word base = 0;
 };
 struct Pending {
@@ -95,13 +97,18 @@ class Capture {
         char name[1024]{};
         Word offset = 0;
         std::ostringstream out;
-        if (symbols->GetNameByOffset(pc, name, sizeof(name), nullptr, &offset) == S_OK) {
+        ULONG index;
+        Word base;
+        DEBUG_MODULE_PARAMETERS module{};
+        bool located = SUCCEEDED(symbols->GetModuleByOffset(pc, 0, &index, &base));
+        bool named = symbols->GetNameByOffset(pc, name, sizeof(name), nullptr, &offset) == S_OK;
+        // With exports alone, the nearest preceding name can be a different function.
+        bool privateSymbols = located && SUCCEEDED(symbols->GetModuleParameters(1, &base, 0, &module))
+            && (module.SymbolType == DEBUG_SYMTYPE_PDB || module.SymbolType == DEBUG_SYMTYPE_CODEVIEW);
+        if (named && (!offset || privateSymbols)) {
             out << name << "+0x" << std::hex << offset;
         } else {
-            ULONG index;
-            Word base;
-            if (SUCCEEDED(symbols->GetModuleByOffset(pc, 0, &index, &base)) &&
-                SUCCEEDED(symbols->GetModuleNameString(DEBUG_MODNAME_MODULE, index, base, name, sizeof(name), nullptr)))
+            if (located && SUCCEEDED(symbols->GetModuleNameString(DEBUG_MODNAME_MODULE, index, base, name, sizeof(name), nullptr)))
                 out << name << "+0x" << std::hex << (pc - base);
             else out << "0x" << std::hex << pc;
         }
@@ -123,8 +130,7 @@ class Capture {
         for (size_t i = 0; i < f.widths.size(); ++i) {
             const auto bytes = f.widths[i] == L'8' ? 8 : 4;
             if (i) line << ',';
-            auto value = f.widths[i] == L'?' ? std::nullopt :
-                wide && i < 4 ? reg(argRegs[i]) : read(slot, wide ? 8 : bytes);
+            auto value = wide && i < 4 ? reg(argRegs[i]) : read(slot, wide ? 8 : bytes);
             line << number(value);
             slot += wide ? 8 : bytes;
         }
@@ -186,8 +192,10 @@ public:
         check(regs->GetInstructionOffset(&pc), "Instruction pointer");
         check(regs->GetStackOffset(&sp), "Stack pointer");
         auto now = Clock::now();
-        for (auto it = calls.rbegin(); it != calls.rend(); ++it) {
-            if (it->thread != thread || it->address != pc || sp <= it->stack) continue;
+        for (auto it = calls.begin(); it != calls.end();) {
+            auto pop = functions[it->function].calleePop;
+            bool matchesStack = pop < 0 ? sp > it->stack : sp == it->stack + sizeof(void*) + pop;
+            if (it->thread != thread || it->address != pc || !matchesStack) { ++it; continue; }
             auto result = reg(wide ? "rax" : "eax");
             if (!wide && functions[it->function].result64) {
                 auto high = reg("edx");
@@ -195,8 +203,7 @@ public:
             }
             auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(now - it->entered).count();
             std::cout << "return\t" << it->id << '\t' << number(result) << '\t' << elapsed << std::endl;
-            calls.erase(std::next(it).base());
-            break;
+            it = calls.erase(it); // A tail call can share its caller's return slot.
         }
         for (size_t i = 0; i < functions.size(); ++i)
             if (functions[i].base && functions[i].base + functions[i].rva == pc) enter(i, thread, sp);
@@ -265,22 +272,22 @@ static void attach(IDebugClient5* client, ULONG pid) {
 }
 
 int wmain(int argc, wchar_t** argv) {
-    if (argc < 7 || (argc - 3) % 4 != 0) return 2;
+    if (argc < 8 || (argc - 3) % 5 != 0) return 2;
     try {
         Capture engine;
-        for (int i = 3; i < argc; i += 4)
-            engine.functions.push_back({argv[i], std::stoull(argv[i+1]), argv[i+2], std::wstring(argv[i+3]) == L"8"});
+        for (int i = 3; i < argc; i += 5)
+            engine.functions.push_back({argv[i], std::stoull(argv[i+1]), argv[i+2], std::wstring(argv[i+3]) == L"8", std::stoi(argv[i+4])});
         if (std::wstring(argv[1]) == L"attach") attach(engine.client.Get(), std::stoul(argv[2]));
         else check(engine.client->CreateProcessWide(0, argv[2], DEBUG_ONLY_THIS_PROCESS | CREATE_NEW_CONSOLE), "Launch target");
-        std::atomic_bool stop{false};
+        auto stop = std::make_shared<std::atomic_bool>(false);
         try {
-            std::thread([&] {
+            std::thread([stop, control = engine.control] {
                 std::string command;
                 std::getline(std::cin, command);
-                stop = true;
-                engine.control->SetInterrupt(DEBUG_INTERRUPT_ACTIVE);
+                *stop = true;
+                control->SetInterrupt(DEBUG_INTERRUPT_ACTIVE);
             }).detach();
-            engine.run(stop);
+            engine.run(*stop);
         } catch (...) {
             engine.client->DetachProcesses();
             throw;

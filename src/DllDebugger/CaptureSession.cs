@@ -7,7 +7,7 @@ public sealed record CapturedCall(long Id, string Function, int Thread, DateTime
     string Stack, string State = "进行中", string Result = "待返回", long? Microseconds = null)
 {
     public string Details => $"{Time:HH:mm:ss.fffffff} · 线程 {Thread} · {Function}\n参数：{Arguments}\n返回：{Result}" +
-        $"\n耗时：{(Microseconds is long us ? us + " µs" : State)}\n调用栈：\n" + Stack.Replace(" | ", "\n");
+        $"\n调试器观测耗时：{(Microseconds is long us ? us + " µs" : State)}\n调用栈：\n" + Stack.Replace(" | ", "\n");
     public override string ToString() => $"#{Id}　{Function}　线程 {Thread}　{State}";
 }
 
@@ -81,6 +81,11 @@ public sealed class CaptureSession
                 var widths = (f.Signature.Parameters ?? []).Select(p => p.Type is "i64" or "u64" or "f64" ? '8' : '4');
                 start.ArgumentList.Add(string.Concat(widths));
                 start.ArgumentList.Add(f.Signature.Result is "i64" or "u64" ? "8" : "4");
+                // On x86, stdcall removes argument slots before returning. An
+                // unknown signature still permits counting entries and returns.
+                int pop = arch == "x64" || f.Signature.Convention == "cdecl" ? 0 :
+                    f.Signature.Parameters == null ? -1 : widths.Sum(w => w == '8' ? 8 : 4);
+                start.ArgumentList.Add(pop.ToString());
             }
             worker = Process.Start(start) ?? throw new InvalidOperationException("无法启动采集器");
         }

@@ -1,6 +1,7 @@
 # Run from the repository root with PowerShell 7 after publishing src/Desktop.
 [CmdletBinding()]
-param([string]$Publish = 'artifacts/publish', [string]$DllFixtures = 'tests/DllDebugger.Tests/bin/Release/net10.0', [switch]$DllOnly, [switch]$MonitorOnly)
+param([string]$Publish = 'artifacts/publish', [string]$DllFixtures = 'tests/DllDebugger.Tests/bin/Release/net10.0',
+      [switch]$DllOnly, [switch]$MonitorOnly, [string]$PreviousMonitorPlugin)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
@@ -186,6 +187,15 @@ function Start-Desktop {
 }
 
 try {
+    if ($MonitorOnly -and $PreviousMonitorPlugin) {
+        $newMonitor = (Resolve-Path "$Publish/plugins/ApiMonitor/ApiMonitor.dll").Path
+        if ((Get-FileHash $PreviousMonitorPlugin).Hash -eq (Get-FileHash $newMonitor).Hash) { throw 'Need two distinct monitor builds' }
+        $desktopCopy = Join-Path $work.FullName 'desktop'
+        Copy-Item -LiteralPath (Resolve-Path $Publish).Path -Destination $desktopCopy -Recurse
+        $liveMonitor = Join-Path $desktopCopy 'plugins/ApiMonitor/ApiMonitor.dll'
+        Copy-Item -LiteralPath $PreviousMonitorPlugin -Destination $liveMonitor
+        $exe = Join-Path $desktopCopy 'MyDebugTools.exe'
+    }
     if (!$DllOnly -and !$MonitorOnly) {
         Build-Sample CompanyTools $companyDir '-p:SampleRevision=1'
         Build-Sample Workbench $providerDir '-p:SummaryVersion=1'

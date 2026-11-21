@@ -21,8 +21,7 @@ public sealed class SignatureStore(string root)
         var export = image.Exports.FirstOrDefault(e => e.Entry == entry || "#" + e.Ordinal == entry);
         if (export != null && image.Symbols.ByRva.TryGetValue(export.Rva, out var pdb))
             return new(pdb with { Entry = entry }, false, "本地 PDB · 待确认");
-        var sdk = WindowsApi.All.FirstOrDefault(f => f.Module.Equals(Path.GetFileName(image.Path),
-            StringComparison.OrdinalIgnoreCase) && f.Signature.Entry == export?.Name);
+        var sdk = WindowsApi.Find(image.Path, export?.Name);
         if (sdk != null) return new(sdk.Signature with { Entry = entry }, false, sdk.Source + " · 待确认");
         return new(Signature.Unknown(entry), false, "待补齐并确认");
     }

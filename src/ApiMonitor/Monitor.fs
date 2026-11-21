@@ -26,10 +26,12 @@ module private View =
         let query = input "搜索 SDK 函数"
         let dll = input "监控 DLL 路径"
         let store = SignatureStore(IO.Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "signatures"))
-        let mutable source = WindowsApi.All |> Seq.toArray
+        let installed = WindowsApi.Installed()
+        let mutable source = installed
         let message = TextBlock(TextWrapping = TextWrapping.Wrap)
         let results = ListBox(Height = 130.)
         let details = TextBlock(TextWrapping = TextWrapping.Wrap)
+        AutomationProperties.SetAutomationId(details, "function-preview")
         let chosen = ListBox(Height = 80.)
         AutomationProperties.SetAutomationId(chosen, "chosen-functions")
         let selected = ResizeArray<MonitorFunction>()
@@ -68,7 +70,7 @@ module private View =
                 message.Text <- image.Path
             with e -> message.Text <- e.Message)
         let sdk = button "使用 SDK 目录" (fun () ->
-            source <- WindowsApi.All |> Seq.toArray
+            source <- installed
             query.Text <- ""
             search())
         let exe = input "目标 EXE 路径"

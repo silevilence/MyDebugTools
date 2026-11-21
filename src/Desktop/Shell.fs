@@ -136,6 +136,7 @@ type MainWindow() as window =
     and change id reload =
         task {
             manager.IsEnabled <- false
+            menu.IsEnabled <- false
             try
                 try
                     let enabled = host.Enabled id
@@ -162,6 +163,7 @@ type MainWindow() as window =
             finally
                 refresh()
                 manager.IsEnabled <- true
+                menu.IsEnabled <- true
                 if closeAfterChange then window.Close()
         } |> ignore
 
@@ -240,9 +242,13 @@ type MainWindow() as window =
         host.Add { Id = "dll.debugger"; Title = "DLL 工作台"; Core = false; Create = fun () -> DllWorkbench.plugin window }
         host.Add { Id = "sample.workbench"; Title = "工作台"; Core = false; Create = fun () -> Workbench() }
         host.Add { Id = "sample.actions"; Title = "工作台扩展"; Core = false; Create = fun () -> WorkbenchActions() }
-        catalog.AddBundled(Path.Combine(AppContext.BaseDirectory, "plugins", "ApiMonitor"))
-        try feedback.Text <- catalog.Restore() |> String.concat Environment.NewLine
-        with e -> feedback.Text <- e.Message
+        let startupMessages = [
+            try catalog.AddBundled(Path.Combine(AppContext.BaseDirectory, "plugins", "ApiMonitor"))
+            with e -> yield $"API 监控：{e.Message}"
+            try yield! catalog.Restore()
+            with e -> yield e.Message
+        ]
+        feedback.Text <- String.concat Environment.NewLine startupMessages
         let layout = DockPanel()
         DockPanel.SetDock(menu, Dock.Top)
         layout.Children.Add menu
