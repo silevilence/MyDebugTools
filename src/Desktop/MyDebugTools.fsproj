@@ -5,6 +5,7 @@
     <SelfContained>false</SelfContained>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="SignatureEditor.fs" />
     <Compile Include="DllWorkbench.fs" />
     <Compile Include="Shell.fs" />
     <Compile Include="Program.fs" />
