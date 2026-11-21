@@ -240,6 +240,7 @@ type MainWindow() as window =
         host.Add { Id = "dll.debugger"; Title = "DLL 工作台"; Core = false; Create = fun () -> DllWorkbench.plugin window }
         host.Add { Id = "sample.workbench"; Title = "工作台"; Core = false; Create = fun () -> Workbench() }
         host.Add { Id = "sample.actions"; Title = "工作台扩展"; Core = false; Create = fun () -> WorkbenchActions() }
+        catalog.AddBundled(Path.Combine(AppContext.BaseDirectory, "plugins", "ApiMonitor"))
         try feedback.Text <- catalog.Restore() |> String.concat Environment.NewLine
         with e -> feedback.Text <- e.Message
         let layout = DockPanel()

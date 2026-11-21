@@ -5,4 +5,7 @@
     <OutputType>Exe</OutputType>
     <UseAppHost>false</UseAppHost>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Catalog/windows-sdk.tsv" LogicalName="WindowsApi.tsv" />
+  </ItemGroup>
 </Project>

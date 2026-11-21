@@ -8,6 +8,7 @@
     <Project Path="samples/WorkbenchActions/WorkbenchActions.fsproj" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/ApiMonitor/ApiMonitor.fsproj" />
     <Project Path="src/DllDebugger/DllDebugger.csproj" />
   </Folder>
   <Folder Name="/tests/">

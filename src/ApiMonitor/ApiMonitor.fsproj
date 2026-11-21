@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Compile Include="Monitor.fs" />
+    <ProjectReference Include="../Contracts/Contracts.fsproj" />
+    <ProjectReference Include="../DllDebugger/DllDebugger.csproj" />
+    <None Update="plugin.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
