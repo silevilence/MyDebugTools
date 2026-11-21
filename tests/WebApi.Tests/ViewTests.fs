@@ -15,6 +15,10 @@ let ``JSON format preserves values and locates invalid UTF8 input in editor char
     | Error e -> Assert.Equal(broken.IndexOf('?'), e.Offset); Assert.Contains("第 2 行", e.Message)
     Assert.Equal(".json", Presentation.language "application/problem+json; charset=utf-8")
     Assert.Equal(".xml", Presentation.language "application/example+xml")
+    for extension in [".json"; ".xml"] do
+        let rules = AvaloniaEdit.Highlighting.HighlightingManager.Instance.GetDefinitionByExtension(extension)
+        Assert.NotNull(rules)
+        Assert.NotEmpty(rules.MainRuleSet.Rules)
 
 [<Fact>]
 let ``XML formatting and HTML preview expose readable structure only``() =

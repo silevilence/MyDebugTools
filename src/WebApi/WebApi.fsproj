@@ -11,6 +11,7 @@
     <None Include="$(PkgAngleSharp)/lib/net10.0/AngleSharp.dll" Link="AngleSharp.dll" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="Definitions.fs" />
     <Compile Include="History.fs" />
+    <Compile Include="Sender.fs" />
     <Compile Include="Plugin.fs" />
     <ProjectReference Include="../Contracts/Contracts.fsproj" />
     <None Update="plugin.json" CopyToOutputDirectory="PreserveNewest" />

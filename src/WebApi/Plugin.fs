@@ -13,14 +13,10 @@ type Plugin() =
     interface IDesktopPlugin with
         member _.Activate registry =
             let events = new Events()
-            let client = Http.createClient()
-            let lifetime = new CancellationTokenSource()
-            registry.Own { new IDisposable with
-                member _.Dispose() =
-                    lifetime.Cancel()
-                    (events :> IDisposable).Dispose()
-                    client.Dispose()
-                    lifetime.Dispose() }
+            let dataDir = Library.directory()
+            let sender = new Sender(dataDir)
+            registry.Own events
+            registry.Own sender
 
             registry.Page {
                 Id = "web.api"; Title = "Web API"
@@ -54,7 +50,6 @@ type Plugin() =
                     tabs.Items.Add(tab "正文" body.Content) |> ignore
                     tabs.Items.Add(tab "接口定义" definitions.Content) |> ignore
                     tabs.Items.Add response |> ignore
-                    let dataDir = Library.directory()
                     let history = HistoryView(events, dataDir, fun msg -> status.Text <- msg)
                     let logTab = tab "请求日志" history.Content
                     tabs.Items.Add(logTab) |> ignore
@@ -69,24 +64,21 @@ type Plugin() =
                         try
                             let args = parameters.Read()
                             let payload = body.Read()
-                            use request = Http.prepareBody (value methodBox) (value url) args payload
+                            let methodName, address, source = value methodBox, value url, definitions.Source
                             let seconds =
                                 match Int32.TryParse(value timeout) with
                                 | true, s when s >= 1 && s <= 86400 -> s
                                 | _ -> invalidOp "超时秒数须在 1 至 86400 之间"
-                            use stop = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token)
-                            let entry = History.snapshot definitions.Source request payload args
-                            History.start dataDir History.limit entry
+                            use stop = new CancellationTokenSource()
                             current <- Some stop
                             sendButton.IsEnabled <- false
                             cancel.IsEnabled <- true
                             status.Text <- "正在发送…"
                             try
-                                let! reply = Http.send client request (TimeSpan.FromSeconds(float seconds)) stop.Token
+                                let! reply = sender.Send(methodName, address, args, payload, source, TimeSpan.FromSeconds(float seconds), stop.Token)
                                 status.Text <- $"{reply.Summary} · {reply.ElapsedMs} ms"
                                 responseView.Show(reply)
                                 tabs.SelectedItem <- response
-                                History.finish dataDir entry.Id status.Text
                             finally
                                 current <- None
                                 cancel.IsEnabled <- false

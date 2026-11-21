@@ -16,7 +16,7 @@ type Definitions(events: Events, capture: unit -> Definition, apply: Definition 
     let mutable paths = [||]
     let selectFolder () =
         let i = folders.SelectedIndex
-        visible <- if i < 0 then [||] else saved |> Array.filter (fun d -> d.Folder = paths[i]) |> Array.sortBy _.Title
+        visible <- if i < 0 || i >= paths.Length then [||] else saved |> Array.filter (fun d -> d.Folder = paths[i]) |> Array.sortBy _.Title
         items.ItemsSource <- visible |> Array.map _.Title
     let refresh target =
         saved <- Library.list dir

@@ -38,8 +38,7 @@ module Http =
         if uri.Scheme <> "http" && uri.Scheme <> "https" then invalidArg "URL" "请输入 HTTP 或 HTTPS 地址"
         let target = UriBuilder(uri, Fragment = "")
         target.Query <- String.concat "&" (seq {
-            let existing = uri.Query.TrimStart('?')
-            if existing <> "" then yield existing
+            if uri.Query.Length > 1 then yield uri.Query.Substring(1)
             yield! query
         })
         let request = new HttpRequestMessage(verb, target.Uri)

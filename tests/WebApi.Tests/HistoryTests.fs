@@ -34,3 +34,21 @@ let ``independent snapshots survive reopen eviction and clearing``() =
         let afterClear = record d.Title "1001"
         Assert.Equal(afterClear, (Assert.Single(rows())).Id)
     finally dir.Delete(true)
+
+[<Fact>]
+let ``closing the plugin finishes logging its in-flight request``() =
+    let started = Threading.Tasks.TaskCompletionSource(Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously)
+    HttpTests.withServer (fun ctx ->
+        started.SetResult()
+        Threading.Tasks.Task.Delay(-1, ctx.RequestAborted)) (fun address -> task {
+        let dir = Directory.CreateTempSubdirectory()
+        try
+            let sender = new Sender(dir.FullName)
+            let run = sender.Send("GET", address, [||], Library.emptyBody, "临时请求", TimeSpan.FromSeconds(10.), Threading.CancellationToken.None)
+            try do! started.Task.WaitAsync(TimeSpan.FromSeconds 5.)
+            finally (sender :> IDisposable).Dispose()
+            let! result = run
+            Assert.Equal("已取消", result.Summary)
+            Assert.StartsWith("已取消", (Assert.Single(History.list dir.FullName)).Result)
+        finally dir.Delete(true)
+    })

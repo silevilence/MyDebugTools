@@ -76,6 +76,10 @@ type Parameters() =
         let name = input "参数名" 130. p.Name
         let actual = input "实参" 160. p.DefaultValue
         let defaultValue = input "默认值" 140. p.DefaultValue
+        let mutable previousDefault = p.DefaultValue
+        handlers.Watch(defaultValue.GetObservable(TextBox.TextProperty).Subscribe(fun next ->
+            if value actual = previousDefault then actual.Text <- next
+            previousDefault <- next))
         let typeName = input "类型" 100. p.TypeName
         let description = input "说明" 180. p.Description
         let required = CheckBox(Content = "必填", IsChecked = Nullable p.Required)
