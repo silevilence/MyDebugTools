@@ -7,8 +7,11 @@
     <Project Path="samples/PrivateText/PrivateText.fsproj" />
     <Project Path="samples/WorkbenchActions/WorkbenchActions.fsproj" />
   </Folder>
-  <Folder Name="/src/" />
+  <Folder Name="/src/">
+    <Project Path="src/DllDebugger/DllDebugger.csproj" />
+  </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/DllDebugger.Tests/DllDebugger.Tests.csproj" />
     <Project Path="tests/Host.Tests/Host.Tests.fsproj" />
   </Folder>
   <Project Path="samples/Workbench/Workbench.fsproj" />

@@ -5,9 +5,11 @@
     <SelfContained>false</SelfContained>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="DllWorkbench.fs" />
     <Compile Include="Shell.fs" />
     <Compile Include="Program.fs" />
     <ProjectReference Include="../Host/Host.fsproj" />
+    <ProjectReference Include="../DllDebugger/DllDebugger.csproj" />
     <ProjectReference Include="../../samples/Workbench/Workbench.fsproj" />
     <ProjectReference Include="../../samples/WorkbenchActions/WorkbenchActions.fsproj" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />

@@ -5,7 +5,7 @@
 
 ## 实施工单
 
-- [ ] [0001-01 打开 DLL 查看导出](issues/01-browse-exports.md)
+- [x] [0001-01 打开 DLL 查看导出](issues/01-browse-exports.md)
 - [ ] [0001-02 录入并复用签名](issues/02-confirm-signature.md)
 - [ ] [0001-03 跨位数连续调用](issues/03-invoke-across-architectures.md)
 - [ ] [0001-04 读写复杂参数](issues/04-complex-arguments.md)
@@ -16,7 +16,7 @@
 
 ## 需求进度
 
-- [ ] 打开与识别（待实施）
+- [x] 打开与识别
 - [ ] 补全函数签名（已确认通常只有 DLL，多语言示例为可选参考，待实施）
 - [ ] 粘贴 C 声明（已确认函数原型、结构体、未知类型与宏的位置提示，待实施）
 - [ ] 本地 PDB（已确认匹配校验、签名补全与来源说明，待实施）

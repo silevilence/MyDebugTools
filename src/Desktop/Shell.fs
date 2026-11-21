@@ -237,6 +237,7 @@ type MainWindow() as window =
             }
         corePage { Id = "core.manager"; Title = "插件管理"; Create = fun () -> ScrollViewer(Content = manager) }
         corePage { Id = "core.targets"; Title = "调试目标"; Create = targets window host }
+        host.Add { Id = "dll.debugger"; Title = "DLL 工作台"; Core = false; Create = fun () -> DllWorkbench.plugin window }
         host.Add { Id = "sample.workbench"; Title = "工作台"; Core = false; Create = fun () -> Workbench() }
         host.Add { Id = "sample.actions"; Title = "工作台扩展"; Core = false; Create = fun () -> WorkbenchActions() }
         try feedback.Text <- catalog.Restore() |> String.concat Environment.NewLine
