@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>MyDebugTools.Contracts</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Plugin.fs" />
+    <PackageReference Include="Avalonia" Version="12.1.1" />
+    <PackageReference Include="Avalonia.FuncUI" Version="2.0.0" />
+  </ItemGroup>
+</Project>

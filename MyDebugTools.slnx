@@ -1,0 +1,11 @@
+<Solution>
+  <Project Path="src/Contracts/Contracts.fsproj" />
+  <Project Path="src/Host/Host.fsproj" />
+  <Project Path="src/Desktop/MyDebugTools.fsproj" />
+  <Folder Name="/samples/" />
+  <Folder Name="/src/" />
+  <Folder Name="/tests/">
+    <Project Path="tests/Host.Tests/Host.Tests.fsproj" />
+  </Folder>
+  <Project Path="samples/Workbench/Workbench.fsproj" />
+</Solution>

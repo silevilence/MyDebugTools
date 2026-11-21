@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>MyDebugTools.Host</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Host.fs" />
+    <ProjectReference Include="../Contracts/Contracts.fsproj" />
+    <PackageReference Include="CordiSharp" Version="0.2.0" />
+  </ItemGroup>
+</Project>
