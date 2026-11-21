@@ -18,6 +18,9 @@ public sealed class SignatureStore(string root)
             if (File.Exists(path))
                 return new(JsonSerializer.Deserialize<Signature>(File.ReadAllText(path))!, exact,
                     exact ? "已确认 · 同一份 DLL" : "DLL 已换版 · 旧签名待重新确认");
+        var export = image.Exports.FirstOrDefault(e => e.Entry == entry || "#" + e.Ordinal == entry);
+        if (export != null && image.Symbols.ByRva.TryGetValue(export.Rva, out var pdb))
+            return new(pdb with { Entry = entry }, false, "本地 PDB · 待确认");
         if (Path.GetFileName(image.Path).Equals("kernel32.dll", StringComparison.OrdinalIgnoreCase)
             && entry is "GetTickCount" or "GetCurrentProcessId")
             return new(new Signature(entry, "u32", "winapi", [], [], []).WithSource("内置 API 定义"), false, "内置 API 定义 · 待确认");

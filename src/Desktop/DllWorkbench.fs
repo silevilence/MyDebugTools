@@ -66,7 +66,7 @@ let plugin (window: Window) =
                                 exports.SelectedIndex <- 0
                                 entry.Text <- loaded.Exports[0].Entry
                                 selectEntry()
-                            status.Text <- $"{loaded.Architecture} · {loaded.Exports.Count} 项导出"
+                            status.Text <- $"{loaded.Architecture} · {loaded.Exports.Count} 项导出 · {loaded.Symbols.Status}"
                         with e -> status.Text <- e.Message
                     panel.Children.Add(TextBlock(Text = "DLL 工作台", FontSize = 24.))
                     panel.Children.Add path

@@ -11,6 +11,7 @@ public sealed record Export(string? Name, int Ordinal, int Rva, string Kind, str
 
 public sealed record DllImage(string Path, string Identity, string Architecture, IReadOnlyList<Export> Exports)
 {
+    public LocalSymbols Symbols { get; private init; } = new("", []);
     public static DllImage Open(string path)
     {
         path = System.IO.Path.GetFullPath(path);
@@ -64,6 +65,6 @@ public sealed record DllImage(string Path, string Identity, string Architecture,
                     exports.Add(new(name, checked(first + i), rva, kind, forwarded ? ReadName(rva) : null));
             }
         }
-        return new(path, identity, arch, exports);
+        return new(path, identity, arch, exports) { Symbols = LocalSymbols.Read(path, pe) };
     }
 }
