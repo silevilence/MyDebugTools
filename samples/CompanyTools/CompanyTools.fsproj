@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Plugin.fs" />
+    <ProjectReference Include="../PrivateText/PrivateText.fsproj" />
+    <ProjectReference Include="../../src/Contracts/Contracts.fsproj" Private="false" ExcludeAssets="runtime" />
+    <None Include="plugin.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

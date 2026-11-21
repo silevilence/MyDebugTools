@@ -3,6 +3,8 @@
   <Project Path="src/Host/Host.fsproj" />
   <Project Path="src/Desktop/MyDebugTools.fsproj" />
   <Folder Name="/samples/">
+    <Project Path="samples/CompanyTools/CompanyTools.fsproj" />
+    <Project Path="samples/PrivateText/PrivateText.fsproj" />
     <Project Path="samples/WorkbenchActions/WorkbenchActions.fsproj" />
   </Folder>
   <Folder Name="/src/" />

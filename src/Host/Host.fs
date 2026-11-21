@@ -20,8 +20,11 @@ type Host() =
     let active = Dictionary<string, PluginHandle>()
     let pages = Dictionary<string, Page>()
 
+    let monitors = Dictionary<string, MonitorSession>()
     let points = Dictionary<string * string, MenuPoint>()
     let extensions = ResizeArray<MenuExtension>()
+
+    member _.Monitor id = match monitors.TryGetValue id with true, session -> Some session | _ -> None
 
     member _.Actions pageId = [
         for extension in extensions do
@@ -42,6 +45,7 @@ type Host() =
             let additions = ResizeArray<Page>()
             let declared = ResizeArray<MenuPoint>()
             let actions = ResizeArray<MenuExtension>()
+            let mutable monitor = None
             let resources = Stack<IDisposable>()
             let release () =
                 while resources.Count > 0 do resources.Pop().Dispose()
@@ -58,6 +62,7 @@ type Host() =
                                 invalidOp $"扩展点重复：{point.PageId}/{point.PointId}"
                             declared.Add point
                         member _.MenuAction action = actions.Add action
+                        member _.Monitor session = monitor <- Some session
                         member _.Own resource = resources.Push resource
                 }
                 for point in declared do
@@ -72,8 +77,10 @@ type Host() =
                 for page in additions do pages.Add(page.Id, page)
                 for point in declared do points.Add((point.PageId, point.PointId), point)
                 extensions.AddRange actions
+                monitor |> Option.iter (fun session -> monitors.Add(id, session))
                 resources.Push { new IDisposable with
                                     member _.Dispose() =
+                                        monitors.Remove id |> ignore
                                         for point in declared do points.Remove((point.PageId, point.PointId)) |> ignore
                                         for action in actions do extensions.Remove action |> ignore
                                         for page in additions do pages.Remove page.Id |> ignore }
@@ -87,7 +94,9 @@ type Host() =
         plugins.Add plugin
         if plugin.Core then this.Enable plugin.Id
 
-    member _.Disable(id) =
+    member this.Disable(id) =
+        if this.Monitor id |> Option.bind (fun session -> session.Target()) |> Option.isSome then
+            invalidOp "请先结束监控会话"
         if plugins |> Seq.exists (fun p -> p.Id = id && p.Core) then invalidOp "核心插件必须保持启用"
         match active.TryGetValue id with
         | true, handle ->

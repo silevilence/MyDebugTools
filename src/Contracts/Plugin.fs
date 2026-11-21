@@ -26,11 +26,17 @@ type MenuExtension = {
     Invoke: string -> string
 }
 
+type MonitorSession = {
+    Target: unit -> string option
+    Stop: unit -> System.Threading.Tasks.Task
+}
+
 /// Resources owned by an activation are released together when it stops.
 type Registration =
     abstract Page: Page -> unit
     abstract MenuPoint: MenuPoint -> unit
     abstract MenuAction: MenuExtension -> unit
+    abstract Monitor: MonitorSession -> unit
     abstract Own: IDisposable -> unit
 
 type IDesktopPlugin =

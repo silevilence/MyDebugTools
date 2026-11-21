@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <DefineConstants Condition="'$(SampleEdition)' == 'B'">$(DefineConstants);EDITION_B</DefineConstants>
+    <DefineConstants Condition="'$(SampleRevision)' == '2'">$(DefineConstants);REVISION_TWO</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="PrivateText.fs" />
+  </ItemGroup>
+</Project>

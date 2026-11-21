@@ -2,6 +2,8 @@
   <ItemGroup>
     <Compile Include="Lifecycle.fs" />
     <Compile Include="Extensions.fs" />
+    <Compile Include="Reload.fs" />
+    <Compile Include="Monitoring.fs" />
     <ProjectReference Include="../../samples/WorkbenchActions/WorkbenchActions.fsproj" />
     <ProjectReference Include="../../src/Host/Host.fsproj" />
     <ProjectReference Include="../../samples/Workbench/Workbench.fsproj" />

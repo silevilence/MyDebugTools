@@ -2,6 +2,7 @@ module MyDebugTools.Desktop.Shell
 
 open System
 open System.Collections.Generic
+open System.IO
 open Avalonia
 open Avalonia.Controls
 open Avalonia.FuncUI.DSL
@@ -39,6 +40,8 @@ let private targets (window: Window) () =
 type MainWindow() as window =
     inherit Window(Title = "MyDebugTools", Width = 860., Height = 580., MinWidth = 580., MinHeight = 400.)
     let host = new Host()
+    let catalog = LocalPlugins(host, Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "plugins.json"))
+    let folderInput = TextBox(PlaceholderText = "本地插件编译目录")
     let cache = Dictionary<string, Control>()
     let menu = Menu()
     let actionsMenu = Menu()
@@ -47,6 +50,21 @@ type MainWindow() as window =
     let manager = StackPanel(Spacing = 12.)
     let feedback = TextBlock(TextWrapping = Media.TextWrapping.Wrap)
     let mutable current = "core.manager"
+
+    let confirmStop target = task {
+        let dialog = Window(Title = "停用监控插件", Width = 460., Height = 180.,
+                            WindowStartupLocation = WindowStartupLocation.CenterOwner)
+        dialog.Content <- StackPanel.create [
+            StackPanel.margin 16.
+            StackPanel.spacing 8.
+            StackPanel.children [
+                TextBlock.create [ TextBlock.text $"正在采集：{target}" ]
+                button "继续监控" (fun () -> dialog.Close(false))
+                button "结束监控并停用" (fun () -> dialog.Close(true))
+            ]
+        ] |> VirtualDom.create
+        return! dialog.ShowDialog<bool>(window)
+    }
 
     let rec navigate id =
         current <- id
@@ -71,6 +89,43 @@ type MainWindow() as window =
             cache.Add(id, control)
             pageArea.Content <- control
 
+    and change id reload =
+        task {
+            manager.IsEnabled <- false
+            try
+                try
+                    let enabled = host.Enabled id
+                    let! proceed = task {
+                        match host.Monitor id with
+                        | Some session ->
+                            match session.Target() with
+                            | Some target ->
+                                let! stop = confirmStop target
+                                if stop then do! session.Stop()
+                                return stop
+                            | None -> return true
+                        | None -> return true
+                    }
+                    if proceed then
+                        if enabled then
+                            host.Disable id
+                            refresh() // Drop all old page instances before reopening the same IDs.
+                        if reload || not enabled then host.Enable id
+                        feedback.Text <- ""
+                with e -> feedback.Text <- e.GetBaseException().Message
+            finally
+                refresh()
+                manager.IsEnabled <- true
+        } |> ignore
+
+    and addDirectory path =
+        try
+            catalog.AddDirectory path
+            folderInput.Text <- ""
+            feedback.Text <- ""
+        with e -> feedback.Text <- e.Message
+        refresh()
+
     and refresh () =
         let pages = host.Pages
         for id in cache.Keys |> Seq.toArray do
@@ -84,7 +139,23 @@ type MainWindow() as window =
         let view = StackPanel.create [
             StackPanel.spacing 12.
             StackPanel.children [
-                TextBlock.create [ TextBlock.text "插件管理"; TextBlock.fontSize 24. ]
+                StackPanel.create [
+                    StackPanel.orientation Orientation.Horizontal
+                    StackPanel.spacing 8.
+                    StackPanel.children [
+                        button "添加目录" (fun () -> addDirectory folderInput.Text)
+                        button "浏览目录…" (fun () ->
+                            task {
+                                let! folders = window.StorageProvider.OpenFolderPickerAsync(FolderPickerOpenOptions(Title = "选择插件编译目录"))
+                                if folders.Count > 0 then addDirectory (folders[0].TryGetLocalPath())
+                            } |> ignore)
+                        button "检查卸载" (fun () ->
+                            let count, pending = catalog.CheckUnloads()
+                            let waiting = String.concat "、" pending
+                            let status = if waiting = "" then "无" else waiting
+                            feedback.Text <- $"已回收 {count} 个旧版本。仍待回收：{status}")
+                    ]
+                ]
                 for plugin in host.Plugins do
                     let enabled = host.Enabled plugin.Id
                     let state = if plugin.Core then "核心 · 固定加载" elif enabled then "普通 · 已启用" else "普通 · 已停用"
@@ -95,16 +166,15 @@ type MainWindow() as window =
                             TextBlock.create [ TextBlock.verticalAlignment VerticalAlignment.Center; TextBlock.text $"{plugin.Title}　{state}" ]
                             if not plugin.Core then
                                 let verb = if enabled then "停用" else "启用"
-                                button $"{verb} {plugin.Title}" (fun () ->
-                                    try
-                                        if enabled then host.Disable plugin.Id else host.Enable plugin.Id
-                                        feedback.Text <- ""
-                                    with e -> feedback.Text <- e.Message
-                                    refresh())
+                                button $"{verb} {plugin.Title}" (fun () -> change plugin.Id false)
+                                if enabled && (catalog.Directory plugin.Id).IsSome then
+                                    button $"重新加载 {plugin.Title}" (fun () -> change plugin.Id true)
                         ]
                     ]
             ]
         ]
+        manager.Children.Add(TextBlock(Text = "插件管理", FontSize = 24.))
+        manager.Children.Add folderInput
         manager.Children.Add(VirtualDom.create view)
         manager.Children.Add feedback
         navigate (if pages |> List.exists (fun p -> p.Id = current) then current else "core.manager")
@@ -119,6 +189,8 @@ type MainWindow() as window =
         corePage { Id = "core.targets"; Title = "调试目标"; Create = targets window }
         host.Add { Id = "sample.workbench"; Title = "工作台"; Core = false; Create = fun () -> Workbench() }
         host.Add { Id = "sample.actions"; Title = "工作台扩展"; Core = false; Create = fun () -> WorkbenchActions() }
+        try feedback.Text <- catalog.Restore() |> String.concat Environment.NewLine
+        with e -> feedback.Text <- e.Message
         let layout = DockPanel()
         DockPanel.SetDock(menu, Dock.Top)
         layout.Children.Add menu
@@ -128,5 +200,11 @@ type MainWindow() as window =
         layout.Children.Add actionResult
         layout.Children.Add pageArea
         window.Content <- layout
-        window.Closed.Add(fun _ -> (host :> IDisposable).Dispose())
+        window.Closed.Add(fun _ ->
+            pageArea.Content <- null
+            cache.Clear()
+            menu.Items.Clear()
+            actionsMenu.Items.Clear()
+            (host :> IDisposable).Dispose()
+            catalog.CheckUnloads() |> ignore)
         refresh()

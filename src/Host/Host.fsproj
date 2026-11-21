@@ -4,6 +4,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Host.fs" />
+    <Compile Include="LocalPlugins.fs" />
     <ProjectReference Include="../Contracts/Contracts.fsproj" />
     <PackageReference Include="CordiSharp" Version="0.2.0" />
   </ItemGroup>
