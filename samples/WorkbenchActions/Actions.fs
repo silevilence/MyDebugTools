@@ -10,3 +10,8 @@ type WorkbenchActions() =
                 MinVersion = 1; MaxVersion = 1; Title = "查看选中项"
                 Invoke = fun selection -> $"当前选中：{selection}"
             }
+            registry.MenuAction {
+                PageId = "sample.workbench"; PointId = "summary"
+                MinVersion = 1; MaxVersion = 1; Title = "显示摘要"
+                Invoke = fun selection -> $"摘要：{selection}"
+            }

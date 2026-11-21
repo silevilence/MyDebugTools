@@ -171,6 +171,8 @@ type MainWindow() as window =
                                     button $"重新加载 {plugin.Title}" (fun () -> change plugin.Id true)
                         ]
                     ]
+                    for reason in host.Mismatches plugin.Id do
+                        TextBlock.create [ TextBlock.text reason; TextBlock.textWrapping Media.TextWrapping.Wrap ]
             ]
         ]
         manager.Children.Add(TextBlock(Text = "插件管理", FontSize = 24.))

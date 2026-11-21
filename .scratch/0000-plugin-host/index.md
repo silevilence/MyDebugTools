@@ -1,14 +1,14 @@
 # 宿主与插件进度
 
 - [x] 需求范围与验收入口已确认，正式规格已发布。
-- [x] 已确认拆分并建立 4 张工单，正在实施 0000-04。
+- [x] 已确认拆分并建立 4 张工单，4 张工单已通过定向检查，正在统一验收。
 
 ## 实施工单
 
 - [x] [0000-01 单入口与插件管理](issues/01-desktop-entry.md)
 - [x] [0000-02 界面扩展点](issues/02-view-extensions.md)
 - [x] [0000-03 本地目录热更新](issues/03-reload-local-plugin.md)
-- [ ] [0000-04 扩展版本不兼容](issues/04-extension-version-mismatch.md)
+- [x] [0000-04 扩展版本不兼容](issues/04-extension-version-mismatch.md)
 
 ## 需求进度
 

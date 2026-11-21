@@ -13,7 +13,9 @@ let ``consumer waits for provider and mounts once on each activation`` () =
     for _ in 1..2 do
         Assert.Empty(host.Actions "sample.workbench")
         host.Enable "provider"
-        let _, invoke = Assert.Single(host.Actions "sample.workbench")
+        let actions = host.Actions "sample.workbench"
+        Assert.Equal(2, actions.Length)
+        let invoke = (Map.ofList actions)["查看选中项"]
         Assert.Equal("当前选中：请求 A", invoke())
         host.Disable "provider"
         Assert.True(host.Enabled "actions")

@@ -8,16 +8,18 @@ open Xunit
 open MyDebugTools.Host
 open MyDebugTools.Samples
 
-let buildCompany output edition revision =
-    let project = Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, "../../samples/CompanyTools/CompanyTools.fsproj"))
+let buildSample name output properties =
+    let project = Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, $"../../samples/{name}/{name}.fsproj"))
     let start = ProcessStartInfo("dotnet", UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true)
-    for arg in [ "build"; project; "--no-restore"; "-o"; output
-                 "-p:SampleEdition=" + edition; "-p:SampleRevision=" + revision ] do
+    for arg in [ "build"; project; "--no-restore"; "-o"; output ] @ properties do
         start.ArgumentList.Add arg
     use build = Process.Start start
     let log = build.StandardOutput.ReadToEnd()
     build.WaitForExit()
     Assert.True(build.ExitCode = 0, log)
+
+let buildCompany output edition revision =
+    buildSample "CompanyTools" output ["-p:SampleEdition=" + edition; "-p:SampleRevision=" + revision]
     let manifest = Path.Combine(output, "plugin.json")
     let original = JsonSerializer.Deserialize<PluginManifest>(File.ReadAllText manifest)
     File.WriteAllText(manifest, JsonSerializer.Serialize({ original with Id = "company." + edition }))

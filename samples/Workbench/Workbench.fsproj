@@ -1,5 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <DefineConstants Condition="'$(SummaryVersion)' == '2'">$(DefineConstants);SUMMARY_V2</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
+    <None Include="plugin.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
     <Compile Include="Workbench.fs" />
     <ProjectReference Include="../../src/Contracts/Contracts.fsproj" />
   </ItemGroup>

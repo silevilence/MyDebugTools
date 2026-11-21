@@ -22,16 +22,30 @@ type Host() =
 
     let monitors = Dictionary<string, MonitorSession>()
     let points = Dictionary<string * string, MenuPoint>()
-    let extensions = ResizeArray<MenuExtension>()
+    let extensions = ResizeArray<string * MenuExtension>()
+    let compatible (point: MenuPoint) (action: MenuExtension) =
+        point.Version >= action.MinVersion && point.Version <= action.MaxVersion
 
     member _.Monitor id = match monitors.TryGetValue id with true, session -> Some session | _ -> None
 
     member _.Actions pageId = [
-        for extension in extensions do
+        for _, extension in extensions do
             match points.TryGetValue((pageId, extension.PointId)) with
-            | true, point when extension.PageId = pageId && point.Version >= extension.MinVersion && point.Version <= extension.MaxVersion ->
+            | true, point when extension.PageId = pageId && compatible point extension ->
                 yield extension.Title, fun () -> extension.Invoke(point.Selection())
             | _ -> ()
+    ]
+
+    member _.Mismatches owner = [
+        for id, extension in extensions do
+            if id = owner then
+                match points.TryGetValue((extension.PageId, extension.PointId)) with
+                | true, point when not (compatible point extension) ->
+                    let required =
+                        if extension.MinVersion = extension.MaxVersion then string extension.MinVersion
+                        else $"{extension.MinVersion}–{extension.MaxVersion}"
+                    yield $"{extension.Title} · {point.PageId}/{point.PointId}：要求版本 {required}，实际版本 {point.Version}"
+                | _ -> ()
     ]
 
     member _.Plugins = plugins |> Seq.toList
@@ -76,13 +90,13 @@ type Host() =
                 let handle = starting.GetAwaiter().GetResult()
                 for page in additions do pages.Add(page.Id, page)
                 for point in declared do points.Add((point.PageId, point.PointId), point)
-                extensions.AddRange actions
+                for action in actions do extensions.Add(id, action)
                 monitor |> Option.iter (fun session -> monitors.Add(id, session))
                 resources.Push { new IDisposable with
                                     member _.Dispose() =
                                         monitors.Remove id |> ignore
                                         for point in declared do points.Remove((point.PageId, point.PointId)) |> ignore
-                                        for action in actions do extensions.Remove action |> ignore
+                                        extensions.RemoveAll(fun (owner, _) -> owner = id) |> ignore
                                         for page in additions do pages.Remove page.Id |> ignore }
                 active.Add(id, handle)
             with _ ->

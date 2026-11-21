@@ -1,0 +1,6 @@
+{
+  "Id": "local.workbench",
+  "Title": "本地工作台",
+  "Assembly": "Workbench.dll",
+  "EntryType": "MyDebugTools.Samples.Workbench"
+}

@@ -14,6 +14,15 @@ type Workbench() =
                 PageId = "sample.workbench"; PointId = "selection"; Version = 1
                 Selection = fun () -> selected
             }
+            registry.MenuPoint {
+                PageId = "sample.workbench"; PointId = "summary"
+#if SUMMARY_V2
+                Version = 2
+#else
+                Version = 1
+#endif
+                Selection = fun () -> selected
+            }
             registry.Page {
                 Id = "sample.workbench"
                 Title = "工作台"
