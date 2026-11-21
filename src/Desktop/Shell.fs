@@ -247,6 +247,8 @@ type MainWindow() as window =
             with e -> yield $"DLL 依赖：{e.Message}"
             try catalog.AddBundled(Path.Combine(AppContext.BaseDirectory, "plugins", "ApiMonitor"))
             with e -> yield $"API 监控：{e.Message}"
+            try catalog.AddBundled(Path.Combine(AppContext.BaseDirectory, "plugins", "WebApi"))
+            with e -> yield $"Web API：{e.Message}"
             try yield! catalog.Restore()
             with e -> yield e.Message
         ]

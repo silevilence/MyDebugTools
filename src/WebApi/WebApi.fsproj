@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Compile Include="Http.fs" />
+    <Compile Include="Editor.fs" />
+    <Compile Include="Plugin.fs" />
+    <ProjectReference Include="../Contracts/Contracts.fsproj" />
+    <None Update="plugin.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -11,10 +11,12 @@
     <Project Path="src/ApiMonitor/ApiMonitor.fsproj" />
     <Project Path="src/DllDependencies/DllDependencies.fsproj" />
     <Project Path="src/DllDebugger/DllDebugger.csproj" />
+    <Project Path="src/WebApi/WebApi.fsproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/DllDebugger.Tests/DllDebugger.Tests.csproj" />
     <Project Path="tests/Host.Tests/Host.Tests.fsproj" />
+    <Project Path="tests/WebApi.Tests/WebApi.Tests.fsproj" />
   </Folder>
   <Project Path="samples/Workbench/Workbench.fsproj" />
 </Solution>

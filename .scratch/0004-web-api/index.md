@@ -1,11 +1,11 @@
 # Web API 调试与接口定义管理进度
 
 - [x] 需求范围与验收入口已确认，正式规格已发布。
-- [x] 已确认拆分并建立 5 张工单，功能待实施。
+- [x] 已确认拆分并建立 5 张工单。当前实施 0004-02。
 
 ## 实施工单
 
-- [ ] [0004-01 临时发送请求](issues/01-send-http-request.md)
+- [x] [0004-01 临时发送请求](issues/01-send-http-request.md)
 - [ ] [0004-02 保存接口定义](issues/02-save-api-definition.md)
 - [ ] [0004-03 发送正文与文件](issues/03-request-body-files.md)
 - [ ] [0004-04 查看请求历史](issues/04-request-history.md)
