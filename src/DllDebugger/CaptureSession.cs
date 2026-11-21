@@ -40,6 +40,13 @@ public sealed class CaptureSession
         return new("launch", "\"" + exe + "\" " + arguments, Path.GetFileName(exe), arch, selection, 10000);
     }
 
+    public static CaptureSession Attach(int pid, string arch, IEnumerable<MonitorFunction> selection)
+    {
+        if (pid == Environment.ProcessId) throw new InvalidOperationException("请选择宿主以外的目标进程");
+        using var process = Process.GetProcessById(pid);
+        return new("attach", pid.ToString(), process.ProcessName, arch, selection, 10000);
+    }
+
     internal CaptureSession(string mode, string target, string label, string arch, IEnumerable<MonitorFunction> selection, int capacity)
     {
         Architecture = arch;

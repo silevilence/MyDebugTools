@@ -91,15 +91,21 @@ module private View =
             | _ -> ()
         calls.SelectionChanged.Add(fun _ -> showDetail())
         history.SelectionChanged.Add(fun _ -> refresh())
-        let start = button "启动并监控" (fun () ->
+        let track beginCapture =
             try
-                let arch = if Targets.forFile exe.Text = X86 then "x86" else "x64"
-                let s = CaptureSession.Launch(exe.Text, string args.Text, arch, selected)
+                let s = beginCapture()
                 sessions.Add s
                 history.ItemsSource <- sessions.ToArray()
                 history.SelectedItem <- s
                 message.Text <- ""
-            with e -> message.Text <- e.Message)
+            with e -> message.Text <- e.Message
+        let architecture = function X86 -> "x86" | X64 -> "x64"
+        let start = button "启动并监控" (fun () -> track (fun () ->
+            CaptureSession.Launch(exe.Text, string args.Text, architecture (Targets.forFile exe.Text), selected)))
+        let pid = input "目标进程 ID"
+        let attach = button "附加并监控" (fun () -> track (fun () ->
+            let id = Int32.Parse pid.Text
+            CaptureSession.Attach(id, architecture (Targets.forProcess id), selected)))
         let stop = button "停止所选会话" (fun () ->
             match history.SelectedItem with
             | :? CaptureSession as s -> s.StopAsync() |> ignore
@@ -113,7 +119,7 @@ module private View =
         reg.Own { new IDisposable with member _.Dispose() = timer.Stop() }
         let controls: Control list =
             [ TextBlock(Text = "API 监控", FontSize = 24.); dll; load; sdk; query; results; details; add
-              TextBlock(Text = "监控函数"); chosen; remove; exe; args; start; message
+              TextBlock(Text = "监控函数"); chosen; remove; exe; args; start; pid; attach; message
               TextBlock(Text = "采集会话"); history; stop; state; calls; detail ]
         controls |> List.iter panel.Children.Add
         ScrollViewer(Content = panel) :> Control

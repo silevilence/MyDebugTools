@@ -4,6 +4,7 @@ $PSNativeCommandUseErrorActionPreference = $true
 foreach ($arch in 'x86', 'x64') {
     $dir = New-Item -ItemType Directory -Path (Join-Path $Output $arch) -Force
     $target = if ($arch -eq 'x86') { 'i686' } else { 'x86_64' }
+    & "$env:WINDIR/Microsoft.NET/Framework/v4.0.30319/csc.exe" /nologo "/platform:$arch" "/out:$dir/interactive.exe" 'fixtures\InteractiveTarget.cs'
     clang-cl "--target=$target-pc-windows-msvc" /c /Z7 /GS- /Od "/Fo$dir/fixture.obj" fixture.c
     $exports = @('/export:forwarded=KERNEL32.GetTickCount', '/export:end_session=KERNEL32.ExitProcess')
     lld-link /dll /noentry /nodefaultlib /debug:full /def:fixture.def @exports "/out:$dir/fixture.dll" "$dir/fixture.obj"

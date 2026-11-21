@@ -242,13 +242,36 @@ public:
     }
 };
 
+static void attach(IDebugClient5* client, ULONG pid) {
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) check(HRESULT_FROM_WIN32(GetLastError()), "Open target");
+    HANDLE token;
+    if (!OpenProcessToken(process, TOKEN_QUERY, &token)) check(HRESULT_FROM_WIN32(GetLastError()), "Target user");
+    DWORD size = 0;
+    GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+    std::vector<BYTE> owner(size);
+    if (!GetTokenInformation(token, TokenUser, owner.data(), size, &size)) check(HRESULT_FROM_WIN32(GetLastError()), "Target user");
+    CloseHandle(token);
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) check(HRESULT_FROM_WIN32(GetLastError()), "Current user");
+    GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+    std::vector<BYTE> current(size);
+    if (!GetTokenInformation(token, TokenUser, current.data(), size, &size)) check(HRESULT_FROM_WIN32(GetLastError()), "Current user");
+    CloseHandle(token);
+    if (!EqualSid(reinterpret_cast<TOKEN_USER*>(owner.data())->User.Sid, reinterpret_cast<TOKEN_USER*>(current.data())->User.Sid))
+        throw std::runtime_error("Target must belong to the current user");
+    auto hr = client->AttachProcess(0, pid, DEBUG_ATTACH_DEFAULT);
+    CloseHandle(process);
+    check(hr, "Attach target");
+}
+
 int wmain(int argc, wchar_t** argv) {
     if (argc < 7 || (argc - 3) % 4 != 0) return 2;
     try {
         Capture engine;
         for (int i = 3; i < argc; i += 4)
             engine.functions.push_back({argv[i], std::stoull(argv[i+1]), argv[i+2], std::wstring(argv[i+3]) == L"8"});
-        check(engine.client->CreateProcessWide(0, argv[2], DEBUG_ONLY_THIS_PROCESS | CREATE_NEW_CONSOLE), "Launch target");
+        if (std::wstring(argv[1]) == L"attach") attach(engine.client.Get(), std::stoul(argv[2]));
+        else check(engine.client->CreateProcessWide(0, argv[2], DEBUG_ONLY_THIS_PROCESS | CREATE_NEW_CONSOLE), "Launch target");
         std::atomic_bool stop{false};
         try {
             std::thread([&] {

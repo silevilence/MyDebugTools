@@ -8,8 +8,9 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <Compile Remove="fixtures/**/*.cs" />
   </ItemGroup>
-  <Target Name="NativeFixtures" BeforeTargets="CopyFilesToOutputDirectory" Inputs="fixture.c;fixture.def;monitor-target.c;BuildFixtures.ps1" Outputs="$(OutDir)x86/monitor-target.exe;$(OutDir)x64/monitor-target.exe;$(OutDir)x86/fixture.dll;$(OutDir)x64/fixture.dll;$(OutDir)x86/fixture.pdb;$(OutDir)x64/fixture.pdb;$(OutDir)x86/reject.dll;$(OutDir)x64/reject.dll;$(OutDir)x86/public.dll;$(OutDir)x64/public.dll;$(OutDir)x86/public.pdb;$(OutDir)x64/public.pdb">
+  <Target Name="NativeFixtures" BeforeTargets="CopyFilesToOutputDirectory" Inputs="fixture.c;fixture.def;monitor-target.c;fixtures/InteractiveTarget.cs;BuildFixtures.ps1" Outputs="$(OutDir)x86/interactive.exe;$(OutDir)x64/interactive.exe;$(OutDir)x86/monitor-target.exe;$(OutDir)x64/monitor-target.exe;$(OutDir)x86/fixture.dll;$(OutDir)x64/fixture.dll;$(OutDir)x86/fixture.pdb;$(OutDir)x64/fixture.pdb;$(OutDir)x86/reject.dll;$(OutDir)x64/reject.dll;$(OutDir)x86/public.dll;$(OutDir)x64/public.dll;$(OutDir)x86/public.pdb;$(OutDir)x64/public.pdb">
     <Exec Command="pwsh -NoProfile -File BuildFixtures.ps1 &quot;$(OutDir).&quot;" />
   </Target>
 </Project>
