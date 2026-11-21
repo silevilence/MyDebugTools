@@ -5,7 +5,10 @@ namespace MyDebugTools.DllDebugger;
 public enum DependencyReference { First, Shared, Cycle }
 
 public sealed record DependencyEdge(string Name, bool Delayed, DependencyModule? Target,
-    DependencyReference Reference, string? Problem);
+    DependencyReference Reference, string? Problem, string? ApiSetHost)
+{
+    public bool IsApiSet => ApiSetSchema.IsContract(Name);
+}
 
 public sealed class DependencyModule(string path, string architecture)
 {
@@ -60,14 +63,20 @@ public sealed record DependencyAnalysis(DependencyModule Root, IReadOnlyList<Dep
         return new(arch, imports);
     }
 
-    public static DependencyAnalysis Read(string file, CancellationToken cancellation = default)
+    private static bool ReadFailed(Exception e) => e is IOException or UnauthorizedAccessException or
+        BadImageFormatException or InvalidDataException or ArgumentOutOfRangeException or OverflowException;
+
+    public static DependencyAnalysis Read(string file, IEnumerable<string>? searchDirectories = null,
+        CancellationToken cancellation = default)
     {
         var path = Path.GetFullPath(file);
         var image = ReadImage(path);
         var root = new DependencyModule(path, image.Architecture);
-        var directories = new[] { Path.GetDirectoryName(path)!, Environment.GetFolderPath(
-            image.Architecture == "x86" ? Environment.SpecialFolder.SystemX86 : Environment.SpecialFolder.System) };
         var comparer = StringComparer.OrdinalIgnoreCase;
+        var system = Environment.GetFolderPath(image.Architecture == "x86"
+            ? Environment.SpecialFolder.SystemX86 : Environment.SpecialFolder.System);
+        var directories = new[] { Path.GetDirectoryName(path)! }.Concat(searchDirectories ?? []).Append(system)
+            .Where(d => !string.IsNullOrEmpty(d)).Select(Path.GetFullPath).Distinct(comparer).ToArray();
         var modules = new Dictionary<string, DependencyModule>(comparer) { [path] = root };
         var active = new HashSet<string>(comparer) { path };
         var stack = new Stack<(DependencyModule Module, List<Import> Imports, int Index)>();
@@ -85,11 +94,28 @@ public sealed record DependencyAnalysis(DependencyModule Root, IReadOnlyList<Dep
             DependencyModule? target = null;
             var reference = DependencyReference.First;
             string? problem = "缺失 · 搜索目录中没有此文件";
-            if (import.Name == Path.GetFileName(import.Name) && import.Name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0)
+            string? host = null;
+            string name = import.Name;
+            if (ApiSetSchema.IsContract(name))
+            {
+                try
+                {
+                    host = ApiSetSchema.Resolve(name, Path.GetFileName(frame.Module.Path));
+                    if (string.IsNullOrEmpty(host)) problem = "本机 API Set 合约没有可用宿主";
+                }
+                catch (Exception e) when (ReadFailed(e)) { problem = $"无法读取本机 API Set 映射 · {e.Message}"; }
+                if (string.IsNullOrEmpty(host))
+                {
+                    frame.Module.Edges.Add(new(name, import.Delayed, null, reference, problem, null));
+                    continue;
+                }
+                name = host;
+            }
+            if (name == Path.GetFileName(name) && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0)
             {
                 foreach (string directory in directories)
                 {
-                    string candidate = Path.Combine(directory, import.Name);
+                    string candidate = Path.Combine(directory, name);
                     if (modules.TryGetValue(candidate, out target))
                     {
                         reference = active.Contains(candidate) ? DependencyReference.Cycle : DependencyReference.Shared;
@@ -110,15 +136,14 @@ public sealed record DependencyAnalysis(DependencyModule Root, IReadOnlyList<Dep
                         stack.Push((target, child.Imports, 0));
                         break;
                     }
-                    catch (Exception e) when (e is IOException or UnauthorizedAccessException or
-                        BadImageFormatException or ArgumentOutOfRangeException or OverflowException)
+                    catch (Exception e) when (ReadFailed(e))
                     {
                         problem = $"无法读取 · {candidate} · {e.Message}";
                     }
                 }
             }
             else problem = "未解析 · 导入名称含路径或无效字符";
-            frame.Module.Edges.Add(new(import.Name, import.Delayed, target, reference, target == null ? problem : null));
+            frame.Module.Edges.Add(new(import.Name, import.Delayed, target, reference, target == null ? problem : null, host));
         }
         return new(root, modules.Values.ToArray());
     }

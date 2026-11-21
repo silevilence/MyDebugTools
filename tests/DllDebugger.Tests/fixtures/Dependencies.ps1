@@ -4,9 +4,9 @@ param([Parameter(Mandatory)][string]$Output)
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 $work = [IO.Directory]::CreateDirectory((Join-Path $Output 'obj')).FullName
-function Import-Library($name) {
+function Import-Library($name, $module = $name) {
     $definition = Join-Path $work "$name.def"
-    "LIBRARY $name.dll`nEXPORTS`n$name" | Set-Content -LiteralPath $definition
+    "LIBRARY $module.dll`nEXPORTS`n$name" | Set-Content -LiteralPath $definition
     lld-link /lib /nologo /machine:x64 "/def:$definition" "/out:$work/$name.lib"
 }
 function Image($name, [string[]]$imports, [string[]]$delay = @(), $directory = $Output) {
@@ -25,8 +25,16 @@ function Image($name, [string[]]$imports, [string[]]$delay = @(), $directory = $
     [void][IO.Directory]::CreateDirectory($directory)
     lld-link /dll /noentry /nodefaultlib /noimplib "/out:$directory/$name.dll" "$work/module.obj" @libs @options
 }
-foreach ($name in 'Root','LeftBranch','Later','SharedLeaf','Choice') { Import-Library $name }
+foreach ($name in 'Root','LeftBranch','Later','SharedLeaf','Choice','LeafA','LeafB') { Import-Library $name }
 Image 'SharedLeaf' @('Root')
 Image 'LeftBranch' @('SharedLeaf')
 Image 'Later' @('SharedLeaf')
 Image 'Root' @('LeftBranch','Later','Choice') @('Later')
+foreach ($variant in 'A','B') {
+    $folder = Join-Path $Output $variant
+    Image "Leaf$variant" @() @() $folder
+    Image 'Choice' @("Leaf$variant") @() $folder
+}
+Import-Library 'SynchContract' 'api-ms-win-core-synch-l1-2-0'
+Import-Library 'AbsentContract' 'api-ms-mydebugtools-missing-l1-1-0'
+Image 'Contracts' @('SynchContract','AbsentContract')
