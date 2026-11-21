@@ -50,4 +50,7 @@ type Definitions(events: Events, capture: unit -> Definition, apply: Definition 
                 TextBlock(Text = "保存到目录"); folder; title
                 row [ button events "保存定义" (run save)
                       button events "新建临时请求" (fun () -> openDefinition Library.blank; report "临时请求") ] ]
-    member _.CurrentId = id
+    member _.Source =
+        saved |> Array.tryFind (fun d -> d.Id = id)
+        |> Option.map (fun d -> String.concat "/" ([ d.Folder; d.Title ] |> List.filter ((<>) "")))
+        |> Option.defaultValue "临时请求"

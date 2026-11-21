@@ -57,6 +57,12 @@ type Plugin() =
                     tabs.Items.Add(tab "正文" body.Content) |> ignore
                     tabs.Items.Add(tab "接口定义" definitions.Content) |> ignore
                     tabs.Items.Add response |> ignore
+                    let dataDir = Library.directory()
+                    let history = HistoryView(events, dataDir, fun msg -> status.Text <- msg)
+                    let logTab = tab "请求日志" history.Content
+                    tabs.Items.Add(logTab) |> ignore
+                    events.Watch(tabs.SelectionChanged.Subscribe(fun e ->
+                        if e.Source = tabs && tabs.SelectedItem = logTab then history.Refresh()))
                     tabs.SelectedIndex <- 0
                     let mutable current: CancellationTokenSource option = None
                     let sendButton = Button(Content = "发送")
@@ -64,12 +70,16 @@ type Plugin() =
                     cancel.IsEnabled <- false
                     let send () = task {
                         try
-                            use request = Http.prepareBody (value methodBox) (value url) (parameters.Read()) (body.Read())
+                            let args = parameters.Read()
+                            let payload = body.Read()
+                            use request = Http.prepareBody (value methodBox) (value url) args payload
                             let seconds =
                                 match Int32.TryParse(value timeout) with
                                 | true, s when s >= 1 && s <= 86400 -> s
                                 | _ -> invalidOp "超时秒数须在 1 至 86400 之间"
                             use stop = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token)
+                            let entry = History.snapshot definitions.Source request payload args
+                            History.start dataDir History.limit entry
                             current <- Some stop
                             sendButton.IsEnabled <- false
                             cancel.IsEnabled <- true
@@ -80,6 +90,7 @@ type Plugin() =
                                 headers.Text <- reply.Headers
                                 raw.Text <- reply.Raw
                                 tabs.SelectedItem <- response
+                                History.finish dataDir entry.Id status.Text
                             finally
                                 current <- None
                                 cancel.IsEnabled <- false

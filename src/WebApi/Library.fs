@@ -29,20 +29,26 @@ module Library =
     let children name (parent: XElement) = parent.Elements(XName.Get name)
     let get name (parent: XElement) = parent.Element(XName.Get name).Value
     let load path root =
-        if File.Exists path then XElement.Load(path, LoadOptions.PreserveWhitespace)
+        if File.Exists path then
+            use input = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read ||| FileShare.Delete)
+            XElement.Load(input, LoadOptions.PreserveWhitespace)
         else XElement(XName.Get root)
 
-    // Hold the file lock across read/modify/replace so independent desktops keep each other's updates.
+    // Serialize read/modify/replace across desktop instances, including plugin reloads.
     let update path root change =
         Directory.CreateDirectory(Path.GetDirectoryName(path: string)) |> ignore
-        use fileLock = File.Open(path + ".lock", FileMode.OpenOrCreate, FileAccess.Write, FileShare.None)
-        let document = load path root
-        change document
-        let temp = path + ".tmp"
-        use output = System.Xml.XmlWriter.Create(temp, System.Xml.XmlWriterSettings(NewLineHandling = System.Xml.NewLineHandling.Entitize))
-        document.Save output
-        output.Close()
-        File.Move(temp, path, true)
+        let key = Path.GetFullPath(path).ToUpperInvariant() |> System.Text.Encoding.UTF8.GetBytes |> System.Security.Cryptography.SHA256.HashData
+        use gate = new System.Threading.Mutex(false, "MyDebugTools.WebApi." + Convert.ToHexString(key))
+        try gate.WaitOne() |> ignore with :? System.Threading.AbandonedMutexException -> ()
+        try
+            let document = load path root
+            change document
+            let temp = path + ".tmp"
+            use output = System.Xml.XmlWriter.Create(temp, System.Xml.XmlWriterSettings(NewLineHandling = System.Xml.NewLineHandling.Entitize))
+            document.Save output
+            output.Close()
+            File.Move(temp, path, true)
+        finally gate.ReleaseMutex()
 
     let bodyNode b = group "body" [ node "kind" b.Kind; node "mediaType" b.MediaType; node "text" b.Text ]
     let readBody (parent: XElement) =

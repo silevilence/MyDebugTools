@@ -6,6 +6,7 @@
     <Compile Include="Editor.fs" />
     <Compile Include="BodyEditor.fs" />
     <Compile Include="Definitions.fs" />
+    <Compile Include="History.fs" />
     <Compile Include="Plugin.fs" />
     <ProjectReference Include="../Contracts/Contracts.fsproj" />
     <None Update="plugin.json" CopyToOutputDirectory="PreserveNewest" />
