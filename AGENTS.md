@@ -4,7 +4,7 @@
 
 ### Issue tracker
 
-每个功能在本地 `.scratch/<feature-slug>/` 目录下用 `spec.md` 记录需求，用同级的 `index.md` 记录完成进度。实施期间随进展更新 `index.md`，直到需求完成。参见[任务跟踪约定](docs/agents/issue-tracker.md)。
+每个功能在本地 `.scratch/<NNNN>-<feature-slug>/` 目录下用 `spec.md` 记录需求，用同级的 `index.md` 记录完成进度。四位编号按需求首次提出的顺序从 `0000` 递增。实施期间随进展更新 `index.md`，直到需求完成。参见[任务跟踪约定](docs/agents/issue-tracker.md)。
 
 ### Triage labels
 
