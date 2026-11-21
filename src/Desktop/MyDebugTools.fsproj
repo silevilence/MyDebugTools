@@ -12,7 +12,7 @@
     <Compile Include="Program.fs" />
     <ProjectReference Include="../Host/Host.fsproj" />
     <ProjectReference Include="../WebApi/WebApi.fsproj" ReferenceOutputAssembly="false" />
-    <Content Include="../WebApi/bin/$(Configuration)/$(TargetFramework)/WebApi.dll;../WebApi/plugin.json"
+    <Content Include="../WebApi/bin/$(Configuration)/$(TargetFramework)/WebApi.dll;../WebApi/bin/$(Configuration)/$(TargetFramework)/AngleSharp.dll;../WebApi/plugin.json"
              Link="plugins/WebApi/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="../DllDependencies/DllDependencies.fsproj" ReferenceOutputAssembly="false" />
     <Content Include="../DllDependencies/bin/$(Configuration)/$(TargetFramework)/DllDependencies.dll;../DllDependencies/plugin.json"

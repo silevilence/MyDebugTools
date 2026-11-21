@@ -36,11 +36,8 @@ type Plugin() =
                     registry.Own parameters
                     let body = BodyEditor(events)
                     let status = TextBlock(TextWrapping = TextWrapping.Wrap)
-                    let headers = multiline "响应头"
-                    let raw = multiline "响应原文"
-                    headers.IsReadOnly <- true
-                    raw.IsReadOnly <- true
-                    let response = tab "响应" (stack [ TextBlock(Text = "响应头"); headers; TextBlock(Text = "原文"); raw ])
+                    let responseView = ResponseView(events)
+                    let response = tab "响应" responseView.Content
                     let tabs = TabControl()
                     let paramsTab = tab "参数" (parameters.Content(events))
                     let capture () =
@@ -87,8 +84,7 @@ type Plugin() =
                             try
                                 let! reply = Http.send client request (TimeSpan.FromSeconds(float seconds)) stop.Token
                                 status.Text <- $"{reply.Summary} · {reply.ElapsedMs} ms"
-                                headers.Text <- reply.Headers
-                                raw.Text <- reply.Raw
+                                responseView.Show(reply)
                                 tabs.SelectedItem <- response
                                 History.finish dataDir entry.Id status.Text
                             finally
