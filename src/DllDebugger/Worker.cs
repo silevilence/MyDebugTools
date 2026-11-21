@@ -9,7 +9,7 @@ using System.Text.Json;
 
 namespace MyDebugTools.DllDebugger;
 
-internal class Worker(string path)
+internal partial class Worker(string path)
 {
     readonly Dictionary<string, nint> handles = [];
     readonly Dictionary<string, MethodInfo> methods = [];
@@ -62,17 +62,6 @@ internal class Worker(string path)
             signature.Convention == "cdecl" ? CallingConvention.Cdecl : CallingConvention.StdCall, CharSet.None);
         method.SetImplementationFlags(method.GetMethodImplementationFlags() | MethodImplAttributes.PreserveSig);
         return methods[key] = holder.CreateType()!.GetMethod("Invoke")!;
-    }
-
-    CallResult Call(CallRequest request)
-    {
-        var s = request.Signature;
-        s.Validate();
-        var parameters = s.Parameters!;
-        var method = Method(s, Scalar(s.Result), parameters.Select(p => Scalar(p.Type)).ToArray());
-        var args = parameters.Select(p => request.Arguments.TryGetValue(p.Name, out var v) ? Input(p.Type, v) :
-            throw new InvalidDataException("缺少参数：" + p.Name)).ToArray();
-        return new(Output(s.Result, method.Invoke(null, args)), []);
     }
 
     static int Main(string[] args)

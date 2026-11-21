@@ -8,7 +8,7 @@
 - [x] [0001-01 打开 DLL 查看导出](issues/01-browse-exports.md)
 - [x] [0001-02 录入并复用签名](issues/02-confirm-signature.md)
 - [x] [0001-03 跨位数连续调用](issues/03-invoke-across-architectures.md)
-- [ ] [0001-04 读写复杂参数](issues/04-complex-arguments.md)
+- [x] [0001-04 读写复杂参数](issues/04-complex-arguments.md)
 - [ ] [0001-05 粘贴 C 声明](issues/05-paste-c-declaration.md)
 - [ ] [0001-06 本地 PDB 补全](issues/06-local-pdb.md)
 - [ ] [0001-07 生成 DllImport 代码](issues/07-generate-dllimport.md)
@@ -22,5 +22,5 @@
 - [ ] 本地 PDB（已确认匹配校验、签名补全与来源说明，待实施）
 - [x] 签名复用
 - [x] 选择与调用
-- [ ] 调用类型（已确认基础类型、缓冲区、输出参数和普通 C 结构体，待实施）
+- [x] 基础类型、缓冲区、输出参数和普通 C 结构体
 - [ ] 示例与批量导出（待实施）

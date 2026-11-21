@@ -9,3 +9,5 @@ use_handle
 close_handle
 count
 spin
+fill
+adjust

@@ -62,6 +62,8 @@ public sealed record Signature(string Entry, string Result, string Convention, P
             if (p.Type == "buffer") Require(p.Length > 0, p.Name + "：缺少有效的缓冲区字节长度。");
             if (p.Type == "string") Require(p.Encoding is "utf8" or "utf16" or "ascii", p.Name + "：请指定 utf8、utf16 或 ascii。");
             if (IsAddress(p.Type)) Require(!string.IsNullOrWhiteSpace(p.Ownership) && p.Ownership != "?", p.Name + "：请注明所有权。");
+            if (p.Type.EndsWith('*') || p.Type is "buffer" or "string")
+                Require(p.Ownership == "caller", p.Name + "：临时参数只支持 caller 所有权，供本次调用使用。");
         }
     }
 
