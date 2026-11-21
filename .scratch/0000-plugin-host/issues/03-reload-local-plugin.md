@@ -2,7 +2,7 @@
 
 Status: ready-for-agent
 
-**What to build:** 选一次仓库外的公司插件编译目录，之后把新版编译到原目录，在工具内手动重载。
+**What to build:** 选一次仓库外的第三方插件编译目录，之后把新版编译到原目录，在工具内手动重载。
 
 **Blocked by:** [0000-01 单入口与插件管理](01-desktop-entry.md)
 

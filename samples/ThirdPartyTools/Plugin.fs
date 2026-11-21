@@ -1,4 +1,4 @@
-namespace Company
+namespace ThirdParty
 
 open Avalonia.Controls
 open Avalonia.FuncUI.DSL
@@ -9,8 +9,8 @@ type Tools() =
     interface IDesktopPlugin with
         member _.Activate registry =
             let edition = PrivateText.edition()
-            let pageId = "company." + edition
-            let title = "公司 " + edition
+            let pageId = "thirdparty." + edition
+            let title = "第三方 " + edition
             registry.Page {
                 Id = pageId; Title = title
                 Create = fun () -> TextBlock.create [ TextBlock.text (title + " " + PrivateText.version()) ] |> VirtualDom.create

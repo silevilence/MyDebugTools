@@ -18,11 +18,11 @@ let buildSample name output properties =
     build.WaitForExit()
     Assert.True(build.ExitCode = 0, log)
 
-let buildCompany output edition revision =
-    buildSample "CompanyTools" output ["-p:SampleEdition=" + edition; "-p:SampleRevision=" + revision]
+let buildThirdParty output edition revision =
+    buildSample "ThirdPartyTools" output ["-p:SampleEdition=" + edition; "-p:SampleRevision=" + revision]
     let manifest = Path.Combine(output, "plugin.json")
     let original = JsonSerializer.Deserialize<PluginManifest>(File.ReadAllText manifest)
-    File.WriteAllText(manifest, JsonSerializer.Serialize({ original with Id = "company." + edition }))
+    File.WriteAllText(manifest, JsonSerializer.Serialize({ original with Id = "thirdparty." + edition }))
 
 let results (host: Host) =
     host.Actions "sample.workbench" |> List.map (fun (_, invoke) -> invoke()) |> List.sort
@@ -38,19 +38,19 @@ let ``external FSharp plugins rebuild in place and release each old dependency g
         host.Enable "provider"
         let catalog = LocalPlugins(host, settings)
         for edition in ["A"; "B"] do
-            buildCompany (directory edition) edition "1"
+            buildThirdParty (directory edition) edition "1"
             catalog.AddDirectory(directory edition)
-            host.Enable("company." + edition)
+            host.Enable("thirdparty." + edition)
         Assert.Equal<string list>(["A v1 · 请求 A"; "B v1 · 请求 A"], results host)
         for revision in ["2"; "1"] do
-            buildCompany (directory "A") "A" revision
-            host.Disable "company.A"
-            host.Enable "company.A"
+            buildThirdParty (directory "A") "A" revision
+            host.Disable "thirdparty.A"
+            host.Enable "thirdparty.A"
             Assert.Equal<string list>([$"A v{revision} · 请求 A"; "B v1 · 请求 A"], results host)
             let _, pending = catalog.CheckUnloads()
             Assert.Empty pending
-        host.Disable "company.A"
-        host.Disable "company.B"
+        host.Disable "thirdparty.A"
+        host.Disable "thirdparty.B"
         let count, pending = catalog.CheckUnloads()
         Assert.Equal(2, count)
         Assert.Empty pending

@@ -1,0 +1,6 @@
+{
+  "Id": "thirdparty.tools",
+  "Title": "第三方工具",
+  "Assembly": "ThirdPartyTools.dll",
+  "EntryType": "ThirdParty.Tools"
+}

@@ -16,7 +16,7 @@ public static extern bool PostMessage(System.IntPtr window, uint message, System
 }
 $exe = (Resolve-Path (Join-Path $Publish 'MyDebugTools.exe')).Path
 $work = [IO.Directory]::CreateTempSubdirectory('MyDebugTools-desktop-')
-$companyDir = Join-Path $work.FullName 'CompanyTools'
+$thirdPartyDir = Join-Path $work.FullName 'ThirdPartyTools'
 $providerDir = Join-Path $work.FullName 'Workbench'
 
 function Build-Sample($sample, $dir, $property) {
@@ -197,7 +197,7 @@ try {
         $exe = Join-Path $desktopCopy 'MyDebugTools.exe'
     }
     if (!$DllOnly -and !$MonitorOnly -and !$DependenciesOnly -and !$WebApiOnly) {
-        Build-Sample CompanyTools $companyDir '-p:SampleRevision=1'
+        Build-Sample ThirdPartyTools $thirdPartyDir '-p:SampleRevision=1'
         Build-Sample Workbench $providerDir '-p:SummaryVersion=1'
     }
     Start-Desktop
@@ -232,24 +232,24 @@ try {
     Add-Directory $providerDir
     Invoke-Control '启用 本地工作台'
     [void](Wait-Element '停用 本地工作台' $button)
-    Add-Directory $companyDir
-    Invoke-Control '启用 公司工具'
-    [void](Wait-Element '停用 公司工具' $button)
+    Add-Directory $thirdPartyDir
+    Invoke-Control '启用 第三方工具'
+    [void](Wait-Element '停用 第三方工具' $button)
     Open-Workbench
     Set-Text '尚未发送的草稿'
     $combo = Wait-Element '' ([Windows.Automation.ControlType]::ComboBox)
     $combo.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
     (Wait-Element '请求 B' ([Windows.Automation.ControlType]::ListItem)).GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
     $combo.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
-    Check-Action '公司 A' 'A v1 · 请求 B'
+    Check-Action '第三方 A' 'A v1 · 请求 B'
     Open-Manager
-    Build-Sample CompanyTools $companyDir '-p:SampleRevision=2'
-    Invoke-Control '重新加载 公司工具'
-    [void](Wait-Element '停用 公司工具' $button)
+    Build-Sample ThirdPartyTools $thirdPartyDir '-p:SampleRevision=2'
+    Invoke-Control '重新加载 第三方工具'
+    [void](Wait-Element '停用 第三方工具' $button)
     Open-Workbench
     $draft = (Wait-Element '' $edit).GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value
     if ($draft -ne '尚未发送的草稿') { throw 'Draft lost' }
-    Check-Action '公司 A' 'A v2 · 请求 B'
+    Check-Action '第三方 A' 'A v2 · 请求 B'
     'PASS private dependency update, current selection and preserved draft'
     Open-Manager
     Invoke-Control '检查卸载'

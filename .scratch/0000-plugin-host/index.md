@@ -27,6 +27,6 @@
 | `dotnet build -c Release --no-restore` | 0 警告，0 错误。 |
 | `dotnet test -c Release --no-restore` | 6 项通过。覆盖两轮启停、提供方恢复、两个私有依赖并存与覆盖编译、版本失配、采集停止顺序、x86/x64 DLL 和进程识别。 |
 | `dotnet publish src/Desktop --no-restore -o artifacts/publish` | 生成框架依赖的 win-x64 桌面入口 MyDebugTools.exe。 |
-| `pwsh -NoProfile -File tests/Desktop.ps1` | Windows UI 自动化从发布版启停插件、添加仓库外目录并重编译。选择“请求 B”后，菜单结果从 A v1 变为 A v2，草稿原样保留。管理页确认旧公司插件及两代旧工作台均已回收，版本诊断、恢复后的菜单及 PID 选择均通过。 |
+| `pwsh -NoProfile -File tests/Desktop.ps1` | Windows UI 自动化从发布版启停插件、添加仓库外目录并重编译。选择“请求 B”后，菜单结果从 A v1 变为 A v2，草稿原样保留。管理页确认旧第三方插件及两代旧工作台均已回收，版本诊断、恢复后的菜单及 PID 选择均通过。 |
 
 首次还原从 NuGet 补齐本机缺少的 Avalonia.FuncUI 2.0.0 和依赖解析所需的 Avalonia 12.1.0。FSharp.Core 来自本机 SDK，界面实际使用已缓存的 Avalonia 12.1.1，CordiSharp 0.2.0 和测试组件也复用本机缓存。后续构建、样例重编译、测试和发布均复用已还原资源。

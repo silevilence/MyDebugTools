@@ -1,4 +1,4 @@
-module Company.PrivateText
+module ThirdParty.PrivateText
 
 let edition () =
 #if EDITION_B

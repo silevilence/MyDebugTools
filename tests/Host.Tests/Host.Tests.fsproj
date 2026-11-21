@@ -7,7 +7,7 @@
     <Compile Include="Monitoring.fs" />
     <Compile Include="Targets.fs" />
     <Compile Include="VersionMismatch.fs" />
-    <ProjectReference Include="../../samples/CompanyTools/CompanyTools.fsproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../samples/ThirdPartyTools/ThirdPartyTools.fsproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="../../samples/WorkbenchActions/WorkbenchActions.fsproj" />
     <ProjectReference Include="../../src/Host/Host.fsproj" />
     <ProjectReference Include="../../samples/Workbench/Workbench.fsproj" />
