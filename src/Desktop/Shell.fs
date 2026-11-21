@@ -41,6 +41,8 @@ type MainWindow() as window =
     let host = new Host()
     let cache = Dictionary<string, Control>()
     let menu = Menu()
+    let actionsMenu = Menu()
+    let actionResult = TextBlock(Margin = Thickness(24., 0., 24., 8.))
     let pageArea = ContentControl(Margin = Thickness 24.)
     let manager = StackPanel(Spacing = 12.)
     let feedback = TextBlock(TextWrapping = Media.TextWrapping.Wrap)
@@ -48,6 +50,19 @@ type MainWindow() as window =
 
     let rec navigate id =
         current <- id
+        actionsMenu.Items.Clear()
+        actionResult.Text <- ""
+        let actions = host.Actions id
+        actionsMenu.IsVisible <- not actions.IsEmpty
+        if not actions.IsEmpty then
+            let group = MenuItem(Header = "页面操作")
+            for title, invoke in actions do
+                let item = MenuItem(Header = title)
+                item.Click.Add(fun _ ->
+                    try actionResult.Text <- invoke()
+                    with e -> actionResult.Text <- e.Message)
+                group.Items.Add item |> ignore
+            actionsMenu.Items.Add group |> ignore
         let page = host.Pages |> List.find (fun p -> p.Id = id)
         match cache.TryGetValue id with
         | true, control -> pageArea.Content <- control
@@ -103,9 +118,14 @@ type MainWindow() as window =
         corePage { Id = "core.manager"; Title = "插件管理"; Create = fun () -> ScrollViewer(Content = manager) }
         corePage { Id = "core.targets"; Title = "调试目标"; Create = targets window }
         host.Add { Id = "sample.workbench"; Title = "工作台"; Core = false; Create = fun () -> Workbench() }
+        host.Add { Id = "sample.actions"; Title = "工作台扩展"; Core = false; Create = fun () -> WorkbenchActions() }
         let layout = DockPanel()
         DockPanel.SetDock(menu, Dock.Top)
         layout.Children.Add menu
+        DockPanel.SetDock(actionsMenu, Dock.Top)
+        layout.Children.Add actionsMenu
+        DockPanel.SetDock(actionResult, Dock.Bottom)
+        layout.Children.Add actionResult
         layout.Children.Add pageArea
         window.Content <- layout
         window.Closed.Add(fun _ -> (host :> IDisposable).Dispose())

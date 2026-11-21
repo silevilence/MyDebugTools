@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Compile Include="Actions.fs" />
+    <ProjectReference Include="../../src/Contracts/Contracts.fsproj" />
+  </ItemGroup>
+</Project>
