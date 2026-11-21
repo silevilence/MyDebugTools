@@ -24,7 +24,7 @@ type private PluginContext(entry: string) =
     override this.Load name =
         let shared =
             name.Name = typeof<IDesktopPlugin>.Assembly.GetName().Name ||
-            name.Name = "DllDebugger" || name.Name = "FSharp.Core" || name.Name = "CordiSharp" ||
+            name.Name = "MyDebugTools.Host" || name.Name = "DllDebugger" || name.Name = "FSharp.Core" || name.Name = "CordiSharp" ||
             name.Name = "Avalonia" || name.Name.StartsWith("Avalonia.", StringComparison.Ordinal)
         if shared then AssemblyLoadContext.Default.LoadFromAssemblyName name
         else

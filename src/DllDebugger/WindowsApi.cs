@@ -1,7 +1,7 @@
 namespace MyDebugTools.DllDebugger;
 
 public sealed record MonitorFunction(string Module, Signature Signature, string Source, string? Restriction = null,
-    string? ImagePath = null, string? Architecture = null, int Rva = 0)
+    string? ImagePath = null, string? Architecture = null, int Rva = 0, string? Identity = null)
 {
     public bool Selectable => Restriction is null;
     public static bool Integer(string type) => Signature.IsScalar(type) && type is not ("f32" or "f64");
@@ -19,6 +19,17 @@ public sealed record MonitorFunction(string Module, Signature Signature, string 
         "返回：" + FieldInfo(Signature.Result)
     });
     public override string ToString() => $"{Module}!{Signature.Entry}　{Level}";
+
+    public static MonitorFunction FromExport(DllImage image, Export export, SignatureStore store)
+    {
+        var match = store.Find(image, export.Entry);
+        bool stale = match.Status.StartsWith("DLL 已换版", StringComparison.Ordinal);
+        var sig = stale ? Signature.Unknown(export.Entry) : match.Signature;
+        string? reason = export.Kind != "代码" ? "此导出属于" + export.Kind :
+            sig.Layouts.Any(l => l.Name == sig.Result || sig.Parameters?.Any(p => p.Type == l.Name) == true)
+                ? "暂不支持按值传递结构体的 ABI" : null;
+        return new(Path.GetFileName(image.Path), sig, match.Status, reason, image.Path, image.Architecture, export.Rva, image.Identity);
+    }
 }
 
 public static class WindowsApi

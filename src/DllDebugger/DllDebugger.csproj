@@ -7,5 +7,13 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Catalog/windows-sdk.tsv" LogicalName="WindowsApi.tsv" />
+    <CaptureArch Include="x86;x64" />
+    <Content Include="$(BaseIntermediateOutputPath)monitor/x86/capture.exe" Link="monitor/x86/capture.exe" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(BaseIntermediateOutputPath)monitor/x64/capture.exe" Link="monitor/x64/capture.exe" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <Target Name="BuildCapture" BeforeTargets="PrepareForBuild"
+          Inputs="MonitorNative/capture.cpp;MonitorNative/build.ps1"
+          Outputs="$(BaseIntermediateOutputPath)monitor/%(CaptureArch.Identity)/capture.exe">
+    <Exec Command="pwsh -NoProfile -File MonitorNative/build.ps1 %(CaptureArch.Identity) &quot;$(BaseIntermediateOutputPath)monitor/%(CaptureArch.Identity)/capture.exe&quot;" />
+  </Target>
 </Project>
