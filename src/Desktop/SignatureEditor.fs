@@ -19,6 +19,7 @@ type Editor() =
     let mutable original = Signature.Unknown ""
     do panel.Children.Add sources
     member _.Panel = panel
+    member _.Entry = original.Entry
     member _.Load(s: Signature) =
         original <- s
         result.Text <- s.Result

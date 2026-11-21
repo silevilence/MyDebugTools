@@ -47,7 +47,7 @@ let plugin (window: Window) =
                                 editor.Load found.Signature
                                 signatureStatus.Text <- found.Status
                             with e -> signatureStatus.Text <- e.Message
-                    entry.TextChanged.Add(fun _ -> selectEntry())
+                    entry.TextChanged.Add(fun _ -> if editor.Entry <> entry.Text then selectEntry())
                     exports.SelectionChanged.Add(fun _ ->
                         match exports.SelectedItem with
                         | :? Export as item -> entry.Text <- item.Entry
@@ -83,6 +83,15 @@ let plugin (window: Window) =
                     panel.Children.Add exports
                     panel.Children.Add(TextBlock(Text = "仅有导出表时，返回类型和参数未知。"))
                     panel.Children.Add entry
+                    let declaration = TextBox(AcceptsReturn = true, PlaceholderText = "C 函数原型及相关结构体声明")
+                    panel.Children.Add declaration
+                    panel.Children.Add(button "识别 C 声明" (fun () ->
+                        try
+                            let parsed = CDeclaration.Parse(declaration.Text, entry.Text)
+                            editor.Load parsed.Signature
+                            entry.Text <- parsed.Signature.Entry
+                            signatureStatus.Text <- String.concat "　" (Array.append [| "来自 C 声明 · 待确认" |] parsed.Notes)
+                        with e -> signatureStatus.Text <- e.Message))
                     panel.Children.Add editor.Panel
                     panel.Children.Add(button "确认并保存签名" (fun () ->
                         try
