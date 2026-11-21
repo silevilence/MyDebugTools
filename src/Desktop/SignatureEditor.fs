@@ -9,6 +9,7 @@ type Editor() =
     let input label multiline =
         panel.Children.Add(TextBlock(Text = label, TextWrapping = Avalonia.Media.TextWrapping.Wrap))
         let box = TextBox(AcceptsReturn = multiline)
+        Avalonia.Automation.AutomationProperties.SetName(box, label)
         panel.Children.Add box
         box
     let result = input "返回类型（void、i8/u8 至 i64/u64、f32、f64、isize、usize、handle 或结构体名）" false

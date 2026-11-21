@@ -23,7 +23,7 @@ public sealed record LocalSymbols(string Status, Dictionary<int, Signature> ByRv
             var result = ReadFunctions(pdb, pe.PEHeaders);
             return new(result.Count == 0 ? "PDB 匹配，缺少函数类型" : $"本地 PDB 匹配 · {result.Count} 项函数类型", result);
         }
-        catch (Exception e) when (e is IOException or ArgumentException or BadImageFormatException or
+        catch (Exception e) when (e is IOException or InvalidDataException or ArgumentException or BadImageFormatException or
             IndexOutOfRangeException or OverflowException or UnauthorizedAccessException)
         { return new("无法读取本地 PDB · " + e.Message, []); }
     }
@@ -42,6 +42,23 @@ public sealed record LocalSymbols(string Status, Dictionary<int, Signature> ByRv
         var offsets = new Dictionary<int, int>();
         int index = I32(types, 8);
         for (int pos = I32(types, 4); pos < types.Length; pos = checked(pos + U16(types, pos) + 2)) offsets.Add(index++, pos);
+        // CodeView stores a structure's byte size before its zero-terminated name.
+        (int Size, int Next) Numeric(int pos) => U16(types, pos) switch
+        {
+            < 0x8000 and var size => (size, pos + 2),
+            0x8002 => (U16(types, pos + 2), pos + 4),
+            0x8004 => (I32(types, pos + 2), pos + 6),
+            _ => (-1, pos)
+        };
+        string StructName(int record)
+        {
+            var (size, name) = Numeric(record + 20);
+            return size < 0 ? "?" : Encoding.UTF8.GetString(types, name, EndString(types, name) - name);
+        }
+        var definitions = new Dictionary<string, int>();
+        foreach (int pos in offsets.Values)
+            if (U16(types, pos + 2) == 0x1505 && (U16(types, pos + 6) & 0x80) == 0)
+                definitions[StructName(pos)] = pos;
         string TypeName(int id, int depth = 0)
         {
             if (depth > 12) return "?";
@@ -61,8 +78,46 @@ public sealed record LocalSymbols(string Status, Dictionary<int, Signature> ByRv
             {
                 0x1001 => TypeName(I32(types, pos + 4), depth + 1), // LF_MODIFIER
                 0x1002 => TypeName(I32(types, pos + 4), depth + 1) + "*", // LF_POINTER
+                0x1505 => StructName(pos), // LF_STRUCTURE, including forward references
                 _ => "?"
             };
+        }
+
+        Layout? StructLayout(string name)
+        {
+            if (!definitions.TryGetValue(name, out int record) ||
+                !offsets.TryGetValue(I32(types, record + 8), out int list) || U16(types, list + 2) != 0x1203)
+                return null;
+            var fields = new List<(Field Field, int Offset, int Size)>();
+            for (int p = list + 4, end = list + 2 + U16(types, list); p < end;)
+            {
+                if (U16(types, p) != 0x150d) return null; // Only ordinary LF_MEMBER records.
+                string type = TypeName(I32(types, p + 4));
+                var (position, start) = Numeric(p + 8);
+                int size = type switch { "u8" or "i8" => 1, "u16" or "i16" => 2, "u32" or "i32" or "f32" => 4,
+                    "u64" or "i64" or "f64" => 8, "handle" => headers.PEHeader!.Magic == PEMagic.PE32 ? 4 : 8, _ => 0 };
+                if (position < 0 || size == 0) return null;
+                int stop = EndString(types, start);
+                fields.Add((new(Encoding.UTF8.GetString(types, start, stop - start), type), position, size));
+                p = (stop + 4) & ~3;
+            }
+            static int Align(int value, int alignment) => checked((value + alignment - 1) & -alignment);
+            foreach (int pack in new[] { 8, 1, 2, 4, 16 })
+            {
+                int cursor = 0, alignment = 1;
+                bool matches = true;
+                foreach (var field in fields)
+                {
+                    int a = Math.Min(pack, field.Size);
+                    cursor = Align(cursor, a);
+                    if (cursor != field.Offset) { matches = false; break; }
+                    cursor += field.Size;
+                    alignment = Math.Max(alignment, a);
+                }
+                if (matches && fields.Count > 0 && Align(cursor, alignment) == Numeric(record + 20).Size)
+                    return new(name, pack, fields.Select(f => f.Field).ToArray());
+            }
+            return null;
         }
 
         int moduleEnd = checked(64 + I32(dbi, 24));
@@ -95,7 +150,9 @@ public sealed record LocalSymbols(string Status, Dictionary<int, Signature> ByRv
                     args[i] = new(names.Count == count ? names[i] : "arg" + (i + 1), t, Signature.IsAddress(t) || t.Contains('?') ? "?" : "in");
                 }
                 string conv = types[proc + 8] switch { 0 => "cdecl", 7 => "stdcall", _ => "?" };
-                result[rva] = new Signature("", TypeName(I32(types, proc + 4)), conv, args, [], []).WithSource("本地 PDB");
+                string returns = TypeName(I32(types, proc + 4));
+                var layouts = args.Select(a => a.Type.TrimEnd('*')).Append(returns).Distinct().Select(StructLayout).OfType<Layout>().ToArray();
+                result[rva] = new Signature("", returns, conv, args, layouts, []).WithSource("本地 PDB");
             }
         }
         return result;

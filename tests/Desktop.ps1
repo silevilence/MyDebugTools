@@ -1,10 +1,18 @@
 # Run from the repository root with PowerShell 7 after publishing src/Desktop.
 [CmdletBinding()]
-param([string]$Publish = 'artifacts/publish')
+param([string]$Publish = 'artifacts/publish', [string]$DllFixtures = 'tests/DllDebugger.Tests/bin/Release/net10.0', [switch]$DllOnly)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+if (!('MyDebugTools.Tests.SaveDialog' -as [type])) {
+    Add-Type -Namespace MyDebugTools.Tests -Name SaveDialog -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+public static extern System.IntPtr SendMessage(System.IntPtr window, uint message, System.IntPtr wParam, string text);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool PostMessage(System.IntPtr window, uint message, System.IntPtr wParam, System.IntPtr lParam);
+'@
+}
 $exe = (Resolve-Path (Join-Path $Publish 'MyDebugTools.exe')).Path
 $work = [IO.Directory]::CreateTempSubdirectory('MyDebugTools-desktop-')
 $companyDir = Join-Path $work.FullName 'CompanyTools'
@@ -26,8 +34,12 @@ function Find-Element($name, $type) {
 
 function Wait-Element($name, $type) {
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
-        $element = Find-Element $name $type
-        if ($element -and $element.Current.IsEnabled) { return $element }
+        try {
+            $element = Find-Element $name $type
+            if ($element -and $element.Current.IsEnabled) { return $element }
+        } catch [System.Runtime.InteropServices.COMException], [Windows.Automation.ElementNotAvailableException] {
+            if ($attempt -eq 29) { throw }
+        }
         Start-Sleep -Milliseconds 100
     }
     $names = $window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition) |
@@ -77,9 +89,91 @@ function Open-Workbench {
     [void](Wait-Element '草稿' $label)
 }
 
+function Check-DllWorkbench {
+    Open-Manager
+    Invoke-Control '启用 DLL 工作台'
+    Invoke-Control 'DLL 工作台' $menuItem
+    $target = Join-Path $work.FullName 'fixture.dll'
+    $values = '{"a":5,"b":7}'
+    foreach ($arch in 'x86', 'x64') {
+        Copy-Item -LiteralPath (Join-Path $DllFixtures "$arch/fixture.dll") -Destination $target
+        if ($arch -eq 'x64') {
+            Copy-Item -LiteralPath (Join-Path $DllFixtures "$arch/fixture.pdb") -Destination $work.FullName
+        }
+        (Wait-Element 'DLL 文件路径' $edit).GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue($target)
+        Invoke-Control '打开 DLL'
+        (Wait-Element '函数入口' $edit).GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue('add')
+        if ($arch -eq 'x64') {
+            [void](Wait-Element 'DLL 已换版 · 旧签名待重新确认' $label)
+        } else {
+            (Wait-Element 'C 声明' $edit).GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue('int __cdecl add(int a, int b);')
+            Invoke-Control '识别 C 声明'
+        }
+        Invoke-Control '确认并保存签名'
+        [void](Wait-Element '已确认 · 同一份 DLL' $label)
+        (Wait-Element '调用参数' $edit).GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue($values)
+        Invoke-Control '调用函数'
+        [void](Wait-Element '{"Result":12,"Outputs":{}}' $label)
+        Invoke-Control '预览代码'
+        $preview = (Wait-Element '生成代码' $edit).GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value
+        if (!$preview.Contains('DllImport(') -or !$preview.Contains('Example()')) { throw 'Expected runnable DllImport example' }
+        if ($arch -eq 'x64') {
+            $format = Wait-Element '代码格式' ([Windows.Automation.ControlType]::ComboBox)
+            $format.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+            (Wait-Element 'C# LibraryImport' ([Windows.Automation.ControlType]::ListItem)).GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+            $format.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
+            Invoke-Control '预览代码'
+            $expected = (Wait-Element '生成代码' $edit).GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value
+            if (!$expected.Contains('LibraryImport(')) { throw 'Expected LibraryImport preview' }
+            Invoke-Control '导出文件…'
+            $filter = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, '#32770')
+            $owner = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, $appProcess.Id)
+            $condition = [Windows.Automation.AndCondition]::new($filter, $owner)
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+                $dialog = [Windows.Automation.AutomationElement]::RootElement.FindFirst([Windows.Automation.TreeScope]::Children, $condition)
+                if (!$dialog) { $dialog = $window.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition) }
+                if ($dialog) { break }
+                Start-Sleep -Milliseconds 100
+            }
+            if (!$dialog) { throw 'Export file picker was not shown' }
+            $byId = [Windows.Automation.AutomationElement]::AutomationIdProperty
+            $scope = [Windows.Automation.TreeScope]::Descendants
+            # The native common dialog exposes these HWNDs as panes without UIA Value/Invoke patterns.
+            $byClass = [Windows.Automation.AutomationElement]::ClassNameProperty
+            function Native-Child($class, $id) {
+                $properties = [Windows.Automation.AndCondition]::new(
+                    [Windows.Automation.PropertyCondition]::new($byId, $id),
+                    [Windows.Automation.PropertyCondition]::new($byClass, $class))
+                $dialog.FindFirst($scope, $properties)
+            }
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+                $nameBox = Native-Child 'Edit' '1001'
+                $save = Native-Child 'Button' '1'
+                if ($nameBox.Current.NativeWindowHandle -and $save.Current.NativeWindowHandle) { break }
+                Start-Sleep -Milliseconds 100
+            }
+            $outputFile = Join-Path $work.FullName 'Bindings.cs'
+            if (!$nameBox.Current.NativeWindowHandle -or !$save.Current.NativeWindowHandle) { throw 'Missing native save controls' }
+            [void][MyDebugTools.Tests.SaveDialog]::SendMessage($nameBox.Current.NativeWindowHandle, 0xC, 0, $outputFile)
+            [void][MyDebugTools.Tests.SaveDialog]::PostMessage($save.Current.NativeWindowHandle, 0xF5, 0, 0)
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+                if ([IO.File]::Exists($outputFile) -and [IO.File]::ReadAllText($outputFile) -eq $expected) { break }
+                Start-Sleep -Milliseconds 100
+            }
+            if ([IO.File]::ReadAllText($outputFile) -ne $expected) { throw 'Export differs from preview' }
+            'PASS exported LibraryImport file matches the preview'
+        }
+        Invoke-Control '重新开始会话'
+        [void](Wait-Element '已重新开始会话。' $label)
+        "PASS DLL workbench $arch · signature confirmation, call and generated example"
+    }
+}
+
 try {
-    Build-Sample CompanyTools $companyDir '-p:SampleRevision=1'
-    Build-Sample Workbench $providerDir '-p:SummaryVersion=1'
+    if (!$DllOnly) {
+        Build-Sample CompanyTools $companyDir '-p:SampleRevision=1'
+        Build-Sample Workbench $providerDir '-p:SummaryVersion=1'
+    }
     $start = [Diagnostics.ProcessStartInfo]::new($exe)
     $start.UseShellExecute = $false
     $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
@@ -93,6 +187,9 @@ try {
         Start-Sleep -Milliseconds 100
     }
     $window = [Windows.Automation.AutomationElement]::FromHandle($hwnd)
+    Check-DllWorkbench
+    if ($DllOnly) { return }
+    Open-Manager
     for ($round = 1; $round -le 2; $round++) {
         Invoke-Control '启用 工作台'
         Open-Workbench
@@ -158,5 +255,9 @@ finally {
         [void]$appProcess.CloseMainWindow()
         if (!$appProcess.WaitForExit(4000)) { $appProcess.Kill(); $appProcess.WaitForExit() }
     }
-    $work.Delete($true)
+    $root = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+    if ($work.Parent.FullName.TrimEnd('\') -ne $root -or !$work.Name.StartsWith('MyDebugTools-desktop-')) {
+        throw "Unexpected test directory $($work.FullName)"
+    }
+    Remove-Item -LiteralPath $work.FullName -Recurse -ErrorAction Stop
 }

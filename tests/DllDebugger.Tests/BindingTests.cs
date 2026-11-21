@@ -21,15 +21,18 @@ public class BindingTests
     }
 
     [Theory]
-    [InlineData(BindingFormat.CSharp)]
-    [InlineData(BindingFormat.FSharp)]
-    [InlineData(BindingFormat.LibraryImport)]
-    public async Task CompilesAndRunsSelectedBindings(BindingFormat format)
+    [InlineData(BindingFormat.CSharp, "x86")]
+    [InlineData(BindingFormat.CSharp, "x64")]
+    [InlineData(BindingFormat.FSharp, "x86")]
+    [InlineData(BindingFormat.FSharp, "x64")]
+    [InlineData(BindingFormat.LibraryImport, "x86")]
+    [InlineData(BindingFormat.LibraryImport, "x64")]
+    public async Task CompilesAndRunsSelectedBindings(BindingFormat format, string arch)
     {
         var dir = Directory.CreateTempSubdirectory();
         try
         {
-            var image = DllImage.Open(ExportsTests.Fixture("x64"));
+            var image = DllImage.Open(ExportsTests.Fixture(arch));
             var store = new SignatureStore(dir.FullName);
             store.Confirm(image, SessionTests.Sig("fill", "i32",
                 new("text", "string", Encoding: "utf8", Ownership: "caller"), new("dst", "buffer", "out", Length: 4, Ownership: "caller"),
@@ -59,10 +62,12 @@ public class BindingTests
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
             await Run(dir.FullName, "dotnet", "restore", project, "--source", cache, "-p:NuGetAudit=false");
             await Run(dir.FullName, "dotnet", "build", project, "--no-restore");
-            string output = await Run(dir.FullName, "dotnet", Path.Combine("bin", "Debug", "net10.0", "Example.dll"));
+            var folder = arch == "x86" ? Environment.SpecialFolder.ProgramFilesX86 : Environment.SpecialFolder.ProgramFiles;
+            string runtime = Path.Combine(Environment.GetFolderPath(folder), "dotnet", "dotnet.exe");
+            string output = await Run(dir.FullName, runtime, Path.Combine("bin", "Debug", "net10.0", "Example.dll"));
             Assert.Contains("231", output);
             Assert.Contains("171", output);
-            Assert.Contains("24", output);
+            Assert.Contains(arch == "x64" ? "24" : "12", output);
             Assert.Contains("13", output);
         }
         finally { dir.Delete(true); }

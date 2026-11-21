@@ -1,6 +1,7 @@
 int data = 7;
 int add(int a, int b) { return a + b; }
 int hidden(void) { return 42; }
+int __stdcall reject_load(void *module, unsigned int event, void *reserved) { return 0; }
 int _fltused;
 double twice(double v) { return 2 * v; }
 static int active;

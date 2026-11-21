@@ -26,6 +26,8 @@ public class SessionTests
         Assert.Equal(42, (await session.Invoke(Sig("#4", "i32"), "{}")).Result.GetInt32());
         Assert.Equal(3.75, (await session.Invoke(Sig("twice", "f64", new Parameter("v", "f64")), """{"v":1.875}""")).Result.GetDouble());
         var h = (await session.Invoke(number, "{}")).Result.GetRawText();
+        Assert.Equal(1, (await session.Invoke(Sig("count", "i32"), "{}")).Result.GetInt32());
+        Assert.Equal(2, (await session.Invoke(Sig("count", "i32"), "{}")).Result.GetInt32());
         string input = "{\"h\":" + h + "}";
         Assert.Equal(1, (await session.Invoke(use, input)).Result.GetInt32());
         await session.Invoke(use with { Entry = "close_handle", Result = "void" }, input);
@@ -35,5 +37,9 @@ public class SessionTests
         using var restarted = Open(arch);
         await Assert.ThrowsAsync<InvalidDataException>(() => restarted.Invoke(use, input));
         Assert.Equal(1, (await restarted.Invoke(Sig("count", "i32"), "{}")).Result.GetInt32());
+        var stop = Sig("end_session", "void", new Parameter("code", "u32")) with { Convention = "stdcall" };
+        await Assert.ThrowsAsync<IOException>(() => restarted.Invoke(stop, """{"code":0}"""));
+        using var afterExit = Open(arch);
+        Assert.Equal(3, (await afterExit.Invoke(add, """{"a":1,"b":2}""")).Result.GetInt32());
     }
 }

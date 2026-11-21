@@ -27,6 +27,15 @@ public sealed class SignatureStore(string root)
         return new(Signature.Unknown(entry), false, "待补齐并确认");
     }
 
+    public Signature ConfirmedDraft(DllImage image, Signature draft)
+    {
+        draft.Validate();
+        var saved = Find(image, draft.Entry);
+        if (!saved.Confirmed || !draft.Values().SequenceEqual(saved.Signature.Values()))
+            throw new InvalidDataException("请先确认并保存当前签名。");
+        return saved.Signature;
+    }
+
     public void Confirm(DllImage image, Signature signature)
     {
         signature.Validate();

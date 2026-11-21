@@ -2,6 +2,7 @@ module MyDebugTools.Desktop.DllWorkbench
 
 open System
 open Avalonia.Controls
+open Avalonia.Automation
 open Avalonia.Layout
 open Avalonia.Platform.Storage
 open MyDebugTools.Contracts
@@ -33,13 +34,17 @@ let plugin (window: Window) =
                     let path = TextBox(PlaceholderText = "DLL 文件路径")
                     let status = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
                     let exports = ListBox(Height = 160.)
+                    AutomationProperties.SetName(path, "DLL 文件路径")
                     let mutable image: DllImage option = None
                     let editor = SignatureEditor.Editor()
                     let entry = TextBox(PlaceholderText = "导出名或 #序号")
                     let signatureStatus = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
                     let store = SignatureStore(IO.Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "signatures"))
                     let arguments = TextBox(Text = "{}", AcceptsReturn = true)
-                    let bindings = BindingPanel.Panel(window, (fun () -> image), (fun () -> entry.Text), (fun () -> arguments.Text), store)
+                    AutomationProperties.SetName(entry, "函数入口")
+                    AutomationProperties.SetName(arguments, "调用参数")
+                    let bindings = BindingPanel.Panel(window.Clipboard, window.StorageProvider, (fun () -> image),
+                                                      (fun () -> editor.Read entry.Text), (fun () -> arguments.Text), store)
                     let selectEntry () =
                         match image with
                         | None -> ()
@@ -69,8 +74,10 @@ let plugin (window: Window) =
                                 exports.SelectedIndex <- 0
                                 entry.Text <- loaded.Exports[0].Entry
                                 selectEntry()
-                            status.Text <- $"{loaded.Architecture} · {loaded.Exports.Count} 项导出 · {loaded.Symbols.Status}"
-                        with e -> status.Text <- e.Message
+                            status.Text <- $"{loaded.Path} · {loaded.Architecture} · {loaded.Exports.Count} 项导出 · {loaded.Symbols.Status}"
+                        with e ->
+                            let active = image |> Option.map _.Path |> Option.defaultValue "无"
+                            status.Text <- $"打开失败 · {e.Message}　当前 DLL · {active}"
                     panel.Children.Add(TextBlock(Text = "DLL 工作台", FontSize = 24.))
                     panel.Children.Add path
                     panel.Children.Add(row [
@@ -87,6 +94,7 @@ let plugin (window: Window) =
                     panel.Children.Add(TextBlock(Text = "仅有导出表时，返回类型和参数未知。"))
                     panel.Children.Add entry
                     let declaration = TextBox(AcceptsReturn = true, PlaceholderText = "C 函数原型及相关结构体声明")
+                    AutomationProperties.SetName(declaration, "C 声明")
                     panel.Children.Add declaration
                     panel.Children.Add(button "识别 C 声明" (fun () ->
                         try
@@ -112,11 +120,7 @@ let plugin (window: Window) =
                             try
                                 panel.IsEnabled <- false
                                 let dll = image |> Option.defaultWith (fun () -> invalidOp "请先打开 DLL。")
-                                let draft = editor.Read entry.Text
-                                draft.Validate()
-                                let saved = store.Find(dll, entry.Text)
-                                if not saved.Confirmed || Seq.toArray (saved.Signature.Values()) <> Seq.toArray (draft.Values()) then
-                                    invalidOp "请先确认并保存当前签名。"
+                                let saved = store.ConfirmedDraft(dll, editor.Read entry.Text)
                                 let worker =
                                     match session with
                                     | Some active -> active
@@ -125,7 +129,7 @@ let plugin (window: Window) =
                                         let active = new CallSession(dll, target.DotNetPath)
                                         session <- Some active
                                         active
-                                let! result = worker.Invoke(saved.Signature, arguments.Text)
+                                let! result = worker.Invoke(saved, arguments.Text)
                                 output.Text <- result.Display()
                             with e -> output.Text <- e.Message
                             panel.IsEnabled <- true

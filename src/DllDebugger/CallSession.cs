@@ -70,6 +70,7 @@ public sealed class CallSession(DllImage image, string dotnetPath) : IDisposable
         if (worker != null)
         {
             if (!worker.HasExited) worker.Kill();
+            worker.WaitForExit();
             worker.Dispose();
             worker = null;
         }

@@ -39,7 +39,9 @@ public sealed record DllImage(string Path, string Identity, string Architecture,
             string ReadName(int rva)
             {
                 var reader = pe.GetSectionData(rva).GetReader();
-                return reader.ReadUTF8(reader.IndexOf(0) is >= 0 and var length ? length : throw new BadImageFormatException());
+                int length = reader.IndexOf(0);
+                if (length < 0) throw new BadImageFormatException("导出名称未终止。");
+                return reader.ReadUTF8(length);
             }
             var aliases = new List<(int Index, string Name)>();
             if (named > 0)
