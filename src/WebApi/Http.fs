@@ -6,7 +6,6 @@ open System.Net.Http
 open System.Text.RegularExpressions
 open System.Threading
 
-type Argument = { Name: string; Location: string; Value: string }
 
 type Reply = {
     Summary: string
@@ -45,13 +44,7 @@ module Http =
         })
         let request = new HttpRequestMessage(verb, target.Uri)
         try
-            if body.Kind = "原始文本" then
-                let mutable raw = body.Text
-                for arg in args do
-                    if arg.Location = "正文" then raw <- raw.Replace("{" + arg.Name + "}", arg.Value)
-                let content = new StringContent(raw, System.Text.Encoding.UTF8)
-                request.Content <- content
-                content.Headers.ContentType <- Headers.MediaTypeHeaderValue.Parse(body.MediaType)
+            Content.attach request body args
             for arg in args do
                 if arg.Location = "请求头" then
                     try request.Headers.Add(arg.Name, arg.Value)

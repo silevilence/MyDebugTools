@@ -36,6 +36,14 @@ let button (events: Events) caption action =
     events.Watch(control.Click.Subscribe(fun _ -> action()))
     control
 
+let browseFile events (target: TextBox) =
+    let pick () = task {
+        let window = TopLevel.GetTopLevel(target)
+        let! files = window.StorageProvider.OpenFilePickerAsync(Platform.Storage.FilePickerOpenOptions(Title = "选择请求文件"))
+        if files.Count > 0 then target.Text <- Platform.Storage.StorageProviderExtensions.TryGetLocalPath(files[0])
+    }
+    button events "选择文件…" (fun () -> pick() |> ignore)
+
 let stack (controls: Control list) =
     let panel = StackPanel(Spacing = 8.)
     for control in controls do panel.Children.Add control
@@ -71,7 +79,11 @@ type Parameters() =
         let typeName = input "类型" 100. p.TypeName
         let description = input "说明" 180. p.Description
         let required = CheckBox(Content = "必填", IsChecked = Nullable p.Required)
-        let location = choice "位置" [| "查询"; "路径"; "请求头"; "正文" |]
+        let location = choice "位置" [| "查询"; "路径"; "请求头"; "正文"; "文件" |]
+        let browse = browseFile handlers actual
+        let toggleBrowse () = browse.IsVisible <- string location.SelectedItem = "文件"
+        handlers.Watch(location.SelectionChanged.Subscribe(fun _ -> toggleBrowse()))
+        toggleBrowse()
         location.SelectedItem <- p.Location
         let read () =
             let key = (value name).Trim()
@@ -81,7 +93,7 @@ type Parameters() =
               Description = value description; DefaultValue = value defaultValue },
             { Name = key; Location = position; Value = value actual }
         let line = stack [
-            row [ location; name; TextBlock(Text = "实参"); actual ]
+            row [ location; name; TextBlock(Text = "实参"); actual; browse ]
             Expander(Header = "参数定义", Content = row [
                 TextBlock(Text = "默认值"); defaultValue; typeName; required; description ])
         ]

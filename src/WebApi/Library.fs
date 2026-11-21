@@ -4,6 +4,8 @@ open System
 open System.IO
 open System.Xml.Linq
 
+type Argument = { Name: string; Location: string; Value: string }
+
 type Parameter = {
     Name: string; Location: string; TypeName: string
     Required: bool; Description: string; DefaultValue: string

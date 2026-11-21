@@ -2,6 +2,7 @@
   <ItemGroup>
     <Compile Include="HttpTests.fs" />
     <Compile Include="LibraryTests.fs" />
+    <Compile Include="BodyTests.fs" />
     <ProjectReference Include="../../src/WebApi/WebApi.fsproj" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
