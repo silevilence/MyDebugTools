@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace MyDebugTools.DllDebugger;
 
-public enum BindingFormat { CSharp, FSharp }
+public enum BindingFormat { CSharp, FSharp, LibraryImport }
 public sealed record GeneratedBindings(string Code, string[] Skipped);
 public static class BindingGenerator
 {
@@ -17,6 +17,8 @@ public static class BindingGenerator
             ? "module Bindings\n\nopen System\nopen System.Runtime.InteropServices\n"
             : "using System;\nusing System.Runtime.InteropServices;\n");
         var skipped = new List<string>();
+        if (format == BindingFormat.LibraryImport)
+            output.AppendLine("using System.Runtime.CompilerServices;\nusing System.Runtime.InteropServices.Marshalling;\n// Build with AllowUnsafeBlocks enabled.");
         int count = 0;
         foreach (var entry in entries.Distinct())
         {
@@ -40,6 +42,7 @@ public static class BindingGenerator
     sealed class Writer(DllImage image, Signature s, BindingFormat format, int index)
     {
         bool FS => format == BindingFormat.FSharp;
+        bool Library => format == BindingFormat.LibraryImport;
         readonly StringBuilder code = new();
         void Line(string text) => code.AppendLine(text);
         static string Literal(string text) => JsonSerializer.Serialize(text);
@@ -64,7 +67,8 @@ public static class BindingGenerator
                 var markers = new List<string>();
                 if (p.Direction != "out") markers.Add("In");
                 if (p.Direction != "in") markers.Add("Out");
-                if (p.Type == "buffer") markers.Add($"MarshalAs(UnmanagedType.LPArray, SizeConst = {p.Length})");
+                if (p.Type == "buffer") markers.Add(Library ? $"MarshalUsing(ConstantElementCount = {p.Length})"
+                    : $"MarshalAs(UnmanagedType.LPArray, SizeConst = {p.Length})");
                 attrs = FS ? "[<" + string.Join("; ", markers) + ">] " : "[" + string.Join(", ", markers) + "] ";
             }
             return $"{attrs}{t} {name}";
@@ -92,14 +96,25 @@ public static class BindingGenerator
         {
             string group = "Native_" + Regex.Replace(s.Entry, @"\W", "_") + "_" + index;
             Line("");
-            Line(FS ? $"module {group} =" : $"public static class {group}\n{{");
+            var modifier = Library ? "partial " : "";
+            Line(FS ? $"module {group} =" : $"public static {modifier}class {group}\n{{");
             foreach (var l in s.Layouts) LayoutCode(l);
             string convention = s.Convention == "cdecl" ? "Cdecl" : s.Convention == "winapi" ? "Winapi" : "StdCall";
             string dll = Literal(image.Path), entry = Literal(s.Entry);
             string attr = $"DllImport({dll}, EntryPoint = {entry}, ExactSpelling = true, CallingConvention = CallingConvention.{convention})";
             string args = string.Join(", ", s.Parameters!.Select(ParameterDecl));
-            Line(FS ? $"    [<{attr}>]" : $"    [{attr}]");
-            Line(FS ? $"    extern {TypeName(s.Result)} Invoke({args})" : $"    public static extern {TypeName(s.Result)} Invoke({args});");
+            if (Library)
+            {
+                Line($"    [LibraryImport({dll}, EntryPoint = {entry})]");
+                if (s.Convention != "winapi")
+                    Line($"    [UnmanagedCallConv(CallConvs = new[] {{ typeof(CallConv{(s.Convention == "cdecl" ? "Cdecl" : "Stdcall")}) }})]");
+                Line($"    public static partial {TypeName(s.Result)} Invoke({args});");
+            }
+            else
+            {
+                Line(FS ? $"    [<{attr}>]" : $"    [{attr}]");
+                Line(FS ? $"    extern {TypeName(s.Result)} Invoke({args})" : $"    public static extern {TypeName(s.Result)} Invoke({args});");
+            }
             if (example != null) Example(example);
             if (!FS) Line("}");
             return code.ToString();

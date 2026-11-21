@@ -10,7 +10,7 @@ open MyDebugTools.DllDebugger
 type Panel(window: Window, image: unit -> DllImage option, entry: unit -> string, arguments: unit -> string, store: SignatureStore) =
     let root = StackPanel(Spacing = 6.)
     let choices = ListBox(Height = 118., SelectionMode = SelectionMode.Multiple)
-    let format = ComboBox(ItemsSource = [| "C# DllImport"; "F# DllImport" |], SelectedIndex = 0)
+    let format = ComboBox(ItemsSource = [| "C# DllImport"; "F# DllImport"; "C# LibraryImport" |], SelectedIndex = 0)
     let mode = ComboBox(ItemsSource = [| "当前函数调用示例"; "批量声明（点选下列导出）" |], SelectedIndex = 0)
     let preview = TextBox(IsReadOnly = true, AcceptsReturn = true, MaxHeight = 180.)
     let report = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
@@ -19,7 +19,11 @@ type Panel(window: Window, image: unit -> DllImage option, entry: unit -> string
         let example = mode.SelectedIndex = 0
         let names = if example then [| entry() |] else choices.SelectedItems |> Seq.cast<Export> |> Seq.map _.Entry |> Seq.toArray
         if names.Length = 0 then invalidOp "请选择要导出的函数。"
-        let target = if format.SelectedIndex = 0 then BindingFormat.CSharp else BindingFormat.FSharp
+        let target =
+            match format.SelectedIndex with
+            | 1 -> BindingFormat.FSharp
+            | 2 -> BindingFormat.LibraryImport
+            | _ -> BindingFormat.CSharp
         let result = BindingGenerator.Generate(dll, store, names, target, if example then arguments() else null)
         preview.Text <- result.Code
         report.Text <- String.concat "\n" result.Skipped

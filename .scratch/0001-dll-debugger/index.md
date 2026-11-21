@@ -12,7 +12,7 @@
 - [x] [0001-05 粘贴 C 声明](issues/05-paste-c-declaration.md)
 - [x] [0001-06 本地 PDB 补全](issues/06-local-pdb.md)
 - [x] [0001-07 生成 DllImport 代码](issues/07-generate-dllimport.md)
-- [ ] [0001-08 生成 LibraryImport 代码](issues/08-generate-libraryimport.md)
+- [x] [0001-08 生成 LibraryImport 代码](issues/08-generate-libraryimport.md)
 
 ## 需求进度
 
@@ -23,4 +23,4 @@
 - [x] 签名复用
 - [x] 选择与调用
 - [x] 基础类型、缓冲区、输出参数和普通 C 结构体
-- [ ] 示例与批量导出（待实施）
+- [x] 三种声明、调用示例与批量导出

@@ -23,6 +23,7 @@ public class BindingTests
     [Theory]
     [InlineData(BindingFormat.CSharp)]
     [InlineData(BindingFormat.FSharp)]
+    [InlineData(BindingFormat.LibraryImport)]
     public async Task CompilesAndRunsSelectedBindings(BindingFormat format)
     {
         var dir = Directory.CreateTempSubdirectory();
