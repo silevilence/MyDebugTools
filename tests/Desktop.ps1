@@ -1,7 +1,7 @@
 # Run from the repository root with PowerShell 7 after publishing src/Desktop.
 [CmdletBinding()]
 param([string]$Publish = 'artifacts/publish', [string]$DllFixtures = 'tests/DllDebugger.Tests/bin/Release/net10.0',
-      [switch]$DllOnly, [switch]$MonitorOnly, [string]$PreviousMonitorPlugin)
+      [switch]$DllOnly, [switch]$MonitorOnly, [string]$PreviousMonitorPlugin, [switch]$DependenciesOnly)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
@@ -196,11 +196,16 @@ try {
         Copy-Item -LiteralPath $PreviousMonitorPlugin -Destination $liveMonitor
         $exe = Join-Path $desktopCopy 'MyDebugTools.exe'
     }
-    if (!$DllOnly -and !$MonitorOnly) {
+    if (!$DllOnly -and !$MonitorOnly -and !$DependenciesOnly) {
         Build-Sample CompanyTools $companyDir '-p:SampleRevision=1'
         Build-Sample Workbench $providerDir '-p:SummaryVersion=1'
     }
     Start-Desktop
+    . "$PSScriptRoot/DllDependencies.ps1"
+    if ($DependenciesOnly) {
+        Check-DllDependencies
+        return
+    }
     if ($MonitorOnly) {
         . "$PSScriptRoot/ApiMonitor.ps1"
         Check-ApiMonitor
@@ -268,6 +273,7 @@ try {
     Invoke-Control '选择目标进程'
     [void](Wait-Element "目标 x64 · $env:ProgramFiles\dotnet\dotnet.exe" $label)
     'PASS x64 process routing'
+    Check-DllDependencies
 }
 finally {
     if ($appProcess -and !$appProcess.HasExited) {

@@ -144,7 +144,11 @@ let plugin (window: Window) (host: Host) =
                     ])
                     panel.Children.Add output
                     panel.Children.Add bindings.Control
-                    tabs.Items.Add(TabItem(Header = "导出", Content = ScrollViewer(Content = panel))) |> ignore
+                    let tabItem title (content: Control) =
+                        let item = TabItem(Header = title, Content = content)
+                        AutomationProperties.SetName(item, title)
+                        item
+                    tabs.Items.Add(tabItem "导出" (ScrollViewer(Content = panel))) |> ignore
                     tabs.SelectedIndex <- 0
                     let syncTabs () =
                         let wanted = host.DllTabs |> List.map snd
@@ -157,7 +161,7 @@ let plugin (window: Window) (host: Host) =
                         for tab in wanted do
                             if mounted.Exists(fun (t, _, _) -> obj.ReferenceEquals(t, tab)) |> not then
                                 let view = tab.Create()
-                                let item = TabItem(Header = tab.Title, Content = view.Content)
+                                let item = tabItem tab.Title view.Content
                                 mounted.Add(tab, item, view)
                                 tabs.Items.Add item |> ignore
                                 image |> Option.iter (fun dll -> view.OpenFile dll.Path)

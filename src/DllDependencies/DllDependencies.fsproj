@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <Compile Include="Labels.fs" />
+    <Compile Include="Graph.fs" />
     <Compile Include="Dependencies.fs" />
+    <InternalsVisibleTo Include="DllDebugger.Tests" />
     <ProjectReference Include="../Contracts/Contracts.fsproj" />
     <ProjectReference Include="../DllDebugger/DllDebugger.csproj" />
     <None Update="plugin.json" CopyToOutputDirectory="PreserveNewest" />

@@ -1,4 +1,5 @@
 using MyDebugTools.DllDebugger;
+using MyDebugTools.DllDependencies;
 using Xunit;
 
 namespace DllDebugger.Tests;
@@ -69,5 +70,28 @@ public class DependencyTests
         var missing = Assert.Single(analysis.Root.Imports, e => e.Target == null);
         Assert.True(missing.IsApiSet);
         Assert.Contains("没有可用宿主", missing.Problem);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("A")]
+    [InlineData("B")]
+    public void DiagramUsesTheTreeEdgesAndOneNodePerHit(string? first)
+    {
+        var analysis = DependencyAnalysis.Read(Fixture("Root.dll"), first == null ? [] : [Fixture(first)]);
+        var (nodes, links) = Graph.project(analysis);
+        Assert.Equal(analysis.Modules.Count + (first == null ? 1 : 0), nodes.Length);
+        Assert.Equal(analysis.Modules.Sum(m => m.Imports.Count), links.Length);
+        foreach (var module in analysis.Modules)
+        {
+            int source = Array.FindIndex(nodes, n => n.Detail == Labels.moduleLabel(module));
+            Assert.True(source >= 0);
+            foreach (var import in module.Imports)
+            {
+                var link = Assert.Single(links, l => l.Source == source && ReferenceEquals(l.Import, import));
+                Assert.Equal(import.Target == null ? import.Problem : Labels.moduleLabel(import.Target),
+                    nodes[link.Destination].Detail);
+            }
+        }
     }
 }

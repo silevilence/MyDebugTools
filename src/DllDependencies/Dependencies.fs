@@ -5,31 +5,37 @@ open System.Threading
 open System.Threading.Tasks
 open Avalonia.Controls
 open Avalonia.Automation
+open Avalonia.Automation.Peers
+open Avalonia.Automation.Provider
+open Avalonia.Controls.Primitives
 open Avalonia.Layout
 open MyDebugTools.Contracts
 open MyDebugTools.DllDebugger
 
 module internal View =
-    let moduleLabel (m: DependencyModule) = $"{m.Path} · {m.Architecture}"
+    // The stock tree peer exposes selection. Also expose branch expansion to
+    // screen readers and to the same Windows automation used by the workbench.
+    type private BranchPeer(item: TreeViewItem) =
+        inherit TreeViewItemAutomationPeer(item)
+        interface IExpandCollapseProvider with
+            member _.Expand() = item.IsExpanded <- true
+            member _.Collapse() = item.IsExpanded <- false
+            member _.ShowsMenu = false
+            member _.ExpandCollapseState =
+                if item.Items.Count = 0 then ExpandCollapseState.LeafNode
+                elif item.IsExpanded then ExpandCollapseState.Expanded
+                else ExpandCollapseState.Collapsed
 
-    let edgeLabel (edge: DependencyEdge) =
-        let kind = if edge.Delayed then "延迟导入" else "普通导入"
-        let relation =
-            match edge.Reference with
-            | DependencyReference.Shared -> " · 共享引用"
-            | DependencyReference.Cycle -> " · 循环引用"
-            | _ -> ""
-        let destination = if isNull edge.Target then edge.Problem else moduleLabel edge.Target
-        let contract =
-            if not edge.IsApiSet then ""
-            elif isNull edge.ApiSetHost then " · API Set 合约"
-            else $" · API Set 宿主 {edge.ApiSetHost}"
-        $"{edge.Name} · {kind}{contract}{relation} · {destination}"
+    type private Branch(title: string) as item =
+        inherit TreeViewItem(Header = title)
+        do AutomationProperties.SetName(item, title)
+        override _.StyleKeyOverride = typeof<TreeViewItem>
+        override _.OnCreateAutomationPeer() = BranchPeer(item)
 
     let tree (result: DependencyAnalysis) =
         let rec populate (parent: TreeViewItem) (m: DependencyModule) =
             for edge in m.Imports do
-                let item = TreeViewItem(Header = edgeLabel edge)
+                let item = Branch(Labels.edgeLabel edge)
                 if edge.Reference = DependencyReference.First && not (isNull edge.Target) && edge.Target.Imports.Count > 0 then
                     // Populate a branch on its first expansion.
                     item.Items.Add(TreeViewItem()) |> ignore
@@ -41,9 +47,10 @@ module internal View =
                                 populate item edge.Target
                             | _ -> ())
                 parent.Items.Add item |> ignore
-        let root = TreeViewItem(Header = moduleLabel result.Root, IsExpanded = true)
+        let root = Branch(Labels.moduleLabel result.Root, IsExpanded = true)
         populate root result.Root
         let control = TreeView()
+        ScrollViewer.SetHorizontalScrollBarVisibility(control, ScrollBarVisibility.Auto)
         control.Items.Add root |> ignore
         control
 
@@ -73,19 +80,30 @@ module internal View =
         layout.Children.Add content
         let mutable pending: CancellationTokenSource option = None
         let mutable current = None
+        let modes = ComboBox(ItemsSource = [| "依赖树"; "依赖图" |], SelectedIndex = 0)
+        AutomationProperties.SetName(modes, "依赖视图")
+        let mutable views: Lazy<Control> array = [||]
+        let show () =
+            if modes.SelectedIndex >= 0 && modes.SelectedIndex < views.Length then
+                content.Content <- views[modes.SelectedIndex].Value
+        modes.SelectionChanged.Add(fun _ -> show())
         let cancel () = pending |> Option.iter (fun source -> source.Cancel())
         let openFile path =
             current <- Some path
             cancel()
             let source = new CancellationTokenSource()
             pending <- Some source
+            views <- [||]
             content.Content <- TextBlock(Text = "正在分析依赖…")
             let search = folders |> Seq.toArray
             task {
                 try
                     try
                         let! result = Task.Run(fun () -> DependencyAnalysis.Read(path, search, source.Token))
-                        if not source.IsCancellationRequested then content.Content <- tree result
+                        if not source.IsCancellationRequested then
+                            views <- [| lazy (tree result :> Control)
+                                        lazy (Graph.create result :> Control) |]
+                            show()
                     with e ->
                         if not source.IsCancellationRequested then content.Content <- TextBlock(Text = e.Message)
                 finally
@@ -131,6 +149,7 @@ module internal View =
         updateButtons()
         header.Children.Add controls
         header.Children.Add feedback
+        header.Children.Add modes
         { Content = layout; OpenFile = openFile; Close = cancel }
 
 type Plugin() =
