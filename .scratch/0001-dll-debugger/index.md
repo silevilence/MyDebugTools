@@ -11,7 +11,7 @@
 - [x] [0001-04 读写复杂参数](issues/04-complex-arguments.md)
 - [x] [0001-05 粘贴 C 声明](issues/05-paste-c-declaration.md)
 - [x] [0001-06 本地 PDB 补全](issues/06-local-pdb.md)
-- [ ] [0001-07 生成 DllImport 代码](issues/07-generate-dllimport.md)
+- [x] [0001-07 生成 DllImport 代码](issues/07-generate-dllimport.md)
 - [ ] [0001-08 生成 LibraryImport 代码](issues/08-generate-libraryimport.md)
 
 ## 需求进度

@@ -38,6 +38,8 @@ let plugin (window: Window) =
                     let entry = TextBox(PlaceholderText = "导出名或 #序号")
                     let signatureStatus = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
                     let store = SignatureStore(IO.Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "signatures"))
+                    let arguments = TextBox(Text = "{}", AcceptsReturn = true)
+                    let bindings = BindingPanel.Panel(window, (fun () -> image), (fun () -> entry.Text), (fun () -> arguments.Text), store)
                     let selectEntry () =
                         match image with
                         | None -> ()
@@ -57,6 +59,7 @@ let plugin (window: Window) =
                             let loaded = DllImage.Open file
                             restart()
                             image <- Some loaded
+                            bindings.Open loaded
                             path.Text <- loaded.Path
                             exports.ItemsSource <- loaded.Exports
                             entry.Text <- ""
@@ -101,7 +104,6 @@ let plugin (window: Window) =
                             selectEntry()
                         with e -> signatureStatus.Text <- e.Message))
                     panel.Children.Add signatureStatus
-                    let arguments = TextBox(Text = "{}", AcceptsReturn = true)
                     let output = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
                     panel.Children.Add(TextBlock(Text = "调用参数（JSON 对象，如 {\"a\":2,\"b\":3}）"))
                     panel.Children.Add arguments
@@ -133,5 +135,6 @@ let plugin (window: Window) =
                         button "重新开始会话" (fun () -> restart(); output.Text <- "已重新开始会话。")
                     ])
                     panel.Children.Add output
+                    panel.Children.Add bindings.Control
                     ScrollViewer(Content = panel)
             } }
