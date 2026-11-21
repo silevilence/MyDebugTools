@@ -8,6 +8,8 @@ class InteractiveTarget
 {
     [DllImport("fixture", CallingConvention = CallingConvention.Cdecl)]
     static extern int add(int a, int b);
+    [DllImport("kernel32")] static extern uint SleepEx(uint milliseconds, bool alertable);
+    [DllImport("kernel32")] static extern void GetSystemTime(IntPtr time);
 
     static void Main()
     {
@@ -23,6 +25,18 @@ class InteractiveTarget
                 } else if (command.StartsWith("child ")) {
                     child.StandardInput.WriteLine(command.Substring(6));
                     Console.WriteLine(child.StandardOutput.ReadLine());
+                } else if (command == "sdk") {
+                    var data = Marshal.AllocHGlobal(16);
+                    GetSystemTime(data);
+                    Marshal.FreeHGlobal(data);
+                    var other = new Thread(delegate() { SleepEx(220, false); });
+                    other.Start();
+                    SleepEx(180, false);
+                    other.Join();
+                    Console.WriteLine("done");
+                } else if (command == "sleep") {
+                    SleepEx(1200, false);
+                    Console.WriteLine("awake");
                 } else {
                     Console.WriteLine(add(int.Parse(command), 100));
                 }

@@ -53,7 +53,7 @@ public sealed class CaptureSession
         Target = label;
         this.capacity = capacity;
         if (arch is not ("x86" or "x64")) throw new ArgumentException("目标架构应为 x86 或 x64");
-        functions = selection.ToArray();
+        functions = WindowsApi.Bind(selection, arch);
         if (functions.Length == 0) throw new InvalidOperationException("请先选择监控函数");
         var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "monitor", arch, "capture.exe")) {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true,
@@ -66,17 +66,15 @@ public sealed class CaptureSession
         {
             foreach (var f in functions)
             {
-                if (!f.Selectable) throw new InvalidOperationException(f.Restriction);
-                if (f.ImagePath == null) throw new InvalidOperationException("此定义尚未绑定到目标架构的 DLL");
                 if (f.Architecture != arch) throw new InvalidOperationException("导出与目标程序位数不同：" + f.Module);
-                if (!locked.TryGetValue(f.ImagePath, out var hash))
+                if (!locked.TryGetValue(f.ImagePath!, out var hash))
                 {
-                    var stream = File.OpenRead(f.ImagePath);
+                    var stream = File.OpenRead(f.ImagePath!);
                     images.Add(stream);
-                    locked.Add(f.ImagePath, hash = Convert.ToHexString(SHA256.HashData(stream)));
+                    locked.Add(f.ImagePath!, hash = Convert.ToHexString(SHA256.HashData(stream)));
                 }
                 if (hash != f.Identity) throw new InvalidDataException("DLL 已换版，请重新选择：" + f.Module);
-                start.ArgumentList.Add(f.ImagePath);
+                start.ArgumentList.Add(f.ImagePath!);
                 start.ArgumentList.Add(f.Rva.ToString());
                 var widths = (f.Signature.Parameters ?? []).Select(p => p.Type is "i64" or "u64" or "f64" ? '8' : '4');
                 start.ArgumentList.Add(string.Concat(widths));

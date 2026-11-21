@@ -39,6 +39,43 @@ public static class WindowsApi
     public static IEnumerable<MonitorFunction> Search(string query) => All.Where(f =>
         (f.Module + "!" + f.Signature.Entry).Contains(query.Trim(), StringComparison.OrdinalIgnoreCase));
 
+    internal static MonitorFunction[] Bind(IEnumerable<MonitorFunction> selected, string arch)
+    {
+        var folder = Environment.GetFolderPath(arch == "x86" ? Environment.SpecialFolder.SystemX86 : Environment.SpecialFolder.System);
+        var images = new Dictionary<string, DllImage>(StringComparer.OrdinalIgnoreCase);
+        var addresses = new HashSet<(string, int)>();
+        MonitorFunction BindOne(MonitorFunction f)
+        {
+            if (!f.Selectable) throw new InvalidOperationException(f.Restriction);
+            if (f.ImagePath != null) return f;
+            var module = f.Module;
+            var entry = f.Signature.Entry;
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (visited.Add(module + "!" + entry))
+            {
+                if (Path.GetFileName(module) != module) throw new InvalidDataException("无效的系统 DLL 名称");
+                if (!images.TryGetValue(module, out var dll))
+                    images.Add(module, dll = DllImage.Open(Path.Combine(folder, module)));
+                var export = dll.Exports.FirstOrDefault(e => e.Entry == entry || "#" + e.Ordinal == entry);
+                if (export?.Kind == "代码")
+                    return f with { ImagePath = dll.Path, Architecture = dll.Architecture, Rva = export.Rva, Identity = dll.Identity };
+                var forward = export?.Forwarder;
+                int split = forward?.LastIndexOf('.') ?? -1;
+                if (forward == null || split < 1)
+                    throw new InvalidOperationException($"本机 {arch} {module} 缺少可监控的入口 {entry}");
+                module = forward[..split] + ".dll";
+                entry = forward[(split + 1)..];
+            }
+            throw new InvalidDataException("转发导出形成循环：" + f);
+        }
+        return selected.Select(f => {
+            var bound = BindOne(f);
+            if (!addresses.Add((bound.ImagePath!.ToUpperInvariant(), bound.Rva)))
+                throw new InvalidOperationException("多个名称指向同一入口，请只选其中一个：" + f);
+            return bound;
+        }).ToArray();
+    }
+
     static string Abi(string native) => native switch
     {
         "void" or "VOID" => "void",

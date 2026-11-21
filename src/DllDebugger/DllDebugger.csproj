@@ -7,6 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Catalog/windows-sdk.tsv" LogicalName="WindowsApi.tsv" />
+    <InternalsVisibleTo Include="DllDebugger.Tests" />
     <CaptureArch Include="x86;x64" />
     <Content Include="$(BaseIntermediateOutputPath)monitor/x86/capture.exe" Link="monitor/x86/capture.exe" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="$(BaseIntermediateOutputPath)monitor/x64/capture.exe" Link="monitor/x64/capture.exe" CopyToOutputDirectory="PreserveNewest" />
