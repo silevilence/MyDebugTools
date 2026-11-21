@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <Compile Include="Labels.fs" />
+    <Compile Include="Subscriptions.fs" />
     <Compile Include="Graph.fs" />
     <Compile Include="Dependencies.fs" />
     <InternalsVisibleTo Include="DllDebugger.Tests" />

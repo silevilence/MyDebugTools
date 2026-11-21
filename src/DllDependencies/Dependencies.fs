@@ -5,63 +5,51 @@ open System.Threading
 open System.Threading.Tasks
 open Avalonia.Controls
 open Avalonia.Automation
-open Avalonia.Automation.Peers
-open Avalonia.Automation.Provider
 open Avalonia.Controls.Primitives
 open Avalonia.Layout
+open Avalonia.Threading
+open Avalonia.FuncUI.DSL
+open Avalonia.FuncUI.VirtualDom
 open MyDebugTools.Contracts
 open MyDebugTools.DllDebugger
 
 module internal View =
-    // The stock tree peer exposes selection. Also expose branch expansion to
-    // screen readers and to the same Windows automation used by the workbench.
-    type private BranchPeer(item: TreeViewItem) =
-        inherit TreeViewItemAutomationPeer(item)
-        interface IExpandCollapseProvider with
-            member _.Expand() = item.IsExpanded <- true
-            member _.Collapse() = item.IsExpanded <- false
-            member _.ShowsMenu = false
-            member _.ExpandCollapseState =
-                if item.Items.Count = 0 then ExpandCollapseState.LeafNode
-                elif item.IsExpanded then ExpandCollapseState.Expanded
-                else ExpandCollapseState.Collapsed
-
-    type private Branch(title: string) as item =
-        inherit TreeViewItem(Header = title)
-        do AutomationProperties.SetName(item, title)
-        override _.StyleKeyOverride = typeof<TreeViewItem>
-        override _.OnCreateAutomationPeer() = BranchPeer(item)
-
-    let tree (result: DependencyAnalysis) =
-        let rec populate (parent: TreeViewItem) (m: DependencyModule) =
+    let tree (subscriptions: Subscriptions.Group) (result: DependencyAnalysis) =
+        let rec populate (parent: TreeViewItem) ancestors (m: DependencyModule) =
+            let branch = m :: ancestors
             for edge in m.Imports do
-                let item = Branch(Labels.edgeLabel edge)
-                if edge.Reference = DependencyReference.First && not (isNull edge.Target) && edge.Target.Imports.Count > 0 then
+                let reference =
+                    if branch |> List.exists (fun ancestor -> obj.ReferenceEquals(ancestor, edge.Target)) then DependencyReference.Cycle
+                    elif edge.Reference = DependencyReference.Cycle then DependencyReference.Shared
+                    else edge.Reference
+                let item = ExpandableTreeItem(Labels.edgeLabelAs reference edge)
+                if reference <> DependencyReference.Cycle && not (isNull edge.Target) && edge.Target.Imports.Count > 0 then
                     // Populate a branch on its first expansion.
                     item.Items.Add(TreeViewItem()) |> ignore
-                    item.PropertyChanged.Add(fun change ->
+                    item.PropertyChanged.Subscribe(fun change ->
                         if change.Property = TreeViewItem.IsExpandedProperty && item.IsExpanded then
                             match item.Items[0] with
                             | :? TreeViewItem as first when isNull first.Header ->
                                 item.Items.Clear()
-                                populate item edge.Target
-                            | _ -> ())
+                                populate item branch edge.Target
+                            | _ -> ()) |> subscriptions.Add
                 parent.Items.Add item |> ignore
-        let root = Branch(Labels.moduleLabel result.Root, IsExpanded = true)
-        populate root result.Root
+        let root = ExpandableTreeItem(Labels.moduleLabel result.Root, IsExpanded = true)
+        populate root [] result.Root
         let control = TreeView()
         ScrollViewer.SetHorizontalScrollBarVisibility(control, ScrollBarVisibility.Auto)
         control.Items.Add root |> ignore
         control
 
     let create () =
+        let tabSubscriptions = Subscriptions.Group()
+        let resultSubscriptions = Subscriptions.Group()
         let layout = DockPanel()
         let header = StackPanel(Spacing = 4.)
-        let note = TextBlock(Text = "静态分析普通导入和延迟导入。运行时动态加载的模块需在运行现场核对。",
-                             TextWrapping = Avalonia.Media.TextWrapping.Wrap)
-        header.Children.Add note
-        header.Children.Add(TextBlock(Text = "搜索顺序：当前 DLL 所在目录 → 自定义目录（从上到下）→ 目标架构的系统目录。",
-                                      TextWrapping = Avalonia.Media.TextWrapping.Wrap))
+        for text in [ "静态分析普通导入和延迟导入。运行时动态加载的模块需在运行现场核对。"
+                      "搜索顺序：当前 DLL 所在目录 → 自定义目录（从上到下）→ 目标架构的系统目录。" ] do
+            TextBlock.create [ TextBlock.text text; TextBlock.textWrapping Avalonia.Media.TextWrapping.Wrap ]
+            |> VirtualDom.create |> header.Children.Add
         let folders = Collections.ObjectModel.ObservableCollection<string>()
         let input = TextBox(PlaceholderText = "搜索目录路径", Width = 240.)
         AutomationProperties.SetName(input, "搜索目录路径")
@@ -71,7 +59,7 @@ module internal View =
         let controls = WrapPanel(Orientation = Orientation.Horizontal)
         let button title run =
             let b = Button(Content = title)
-            b.Click.Add(fun _ -> run())
+            b.Click.Subscribe(fun _ -> run()) |> tabSubscriptions.Add
             controls.Children.Add b
             b
         DockPanel.SetDock(header, Dock.Top)
@@ -86,13 +74,14 @@ module internal View =
         let show () =
             if modes.SelectedIndex >= 0 && modes.SelectedIndex < views.Length then
                 content.Content <- views[modes.SelectedIndex].Value
-        modes.SelectionChanged.Add(fun _ -> show())
+        modes.SelectionChanged.Subscribe(fun _ -> show()) |> tabSubscriptions.Add
         let cancel () = pending |> Option.iter (fun source -> source.Cancel())
         let openFile path =
             current <- Some path
             cancel()
             let source = new CancellationTokenSource()
             pending <- Some source
+            resultSubscriptions.Clear()
             views <- [||]
             content.Content <- TextBlock(Text = "正在分析依赖…")
             let search = folders |> Seq.toArray
@@ -101,8 +90,8 @@ module internal View =
                     try
                         let! result = Task.Run(fun () -> DependencyAnalysis.Read(path, search, source.Token))
                         if not source.IsCancellationRequested then
-                            views <- [| lazy (tree result :> Control)
-                                        lazy (Graph.create result :> Control) |]
+                            views <- [| lazy (tree resultSubscriptions result :> Control)
+                                        lazy (Graph.create resultSubscriptions result :> Control) |]
                             show()
                     with e ->
                         if not source.IsCancellationRequested then content.Content <- TextBlock(Text = e.Message)
@@ -145,13 +134,22 @@ module internal View =
             up.IsEnabled <- i > 0
             down.IsEnabled <- i >= 0 && i < folders.Count - 1
             remove.IsEnabled <- i >= 0
-        order.SelectionChanged.Add(fun _ -> updateButtons())
+        order.SelectionChanged.Subscribe(fun _ -> updateButtons()) |> tabSubscriptions.Add
         updateButtons()
         header.Children.Add controls
         header.Children.Add feedback
         header.Children.Add modes
-        { Content = layout; OpenFile = openFile; Close = cancel }
+        let close () =
+            let release () =
+                cancel()
+                tabSubscriptions.Clear()
+                resultSubscriptions.Clear()
+                views <- [||]
+            if Dispatcher.UIThread.CheckAccess() then release() else Dispatcher.UIThread.Post release
+        { Content = layout; OpenFile = openFile; Close = close }
 
 type Plugin() =
     interface IDesktopPlugin with
-        member _.Activate registry = registry.DllTab { Title = "依赖"; Create = View.create }
+        member _.Activate registry =
+            registry.DllTab { PageId = "dll.debugger"; PointId = "tabs"; MinVersion = 1; MaxVersion = 1
+                              Title = "依赖"; Create = View.create }

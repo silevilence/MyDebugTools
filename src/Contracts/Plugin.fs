@@ -26,8 +26,18 @@ type DllTabView = {
 }
 
 type DllTab = {
+    PageId: string
+    PointId: string
+    MinVersion: int
+    MaxVersion: int
     Title: string
     Create: unit -> DllTabView
+}
+
+type DllTabPoint = {
+    PageId: string
+    PointId: string
+    Version: int
 }
 
 /// A menu action receives the provider's current selection at invocation time.
@@ -57,6 +67,7 @@ type Registration =
     abstract CurrentTarget: unit -> DebugTarget option
     abstract Page: Page -> unit
     abstract DllTab: DllTab -> unit
+    abstract DllTabPoint: DllTabPoint -> unit
     abstract MenuPoint: MenuPoint -> unit
     abstract MenuAction: MenuExtension -> unit
     abstract Monitor: MonitorSession -> unit

@@ -54,52 +54,48 @@ let project (analysis: DependencyAnalysis) =
 let private width, height = 164., 34.
 let private origin node = Point(20. + 220. * float node.Column, 24. + 64. * float node.Row)
 
-type private Lines(nodes: Node array, links: Link array) =
-    inherit Control(IsHitTestVisible = false)
-    let pairs = links |> Array.distinctBy (fun e -> e.Source, e.Destination)
-    let mutable active = 0
-    member this.Select index =
-        active <- index
-        this.InvalidateVisual()
-    override _.Render(context) =
-        let draw (edge: Link) =
-            let fromNode, toNode = nodes[edge.Source], nodes[edge.Destination]
-            let a, b = origin fromNode, origin toNode
-            let start = Point(a.X + width, a.Y + height / 2.)
-            let finish = Point(b.X, b.Y + height / 2.)
-            let selected = edge.Source = active || edge.Destination = active
-            let pen = Pen((if selected then Brushes.SteelBlue else Brushes.Gray), (if selected then 2. else 1.))
-            let route =
-                if toNode.Column = fromNode.Column + 1 then
-                    [| start; Point(start.X + 8., start.Y); Point(finish.X - 12., finish.Y); finish |]
-                else
-                    // Return edges use the space above a row, including self loops.
-                    let y = min a.Y b.Y - 12.
-                    [| start; Point(start.X + 12., start.Y); Point(start.X + 12., y)
-                       Point(finish.X - 12., y); Point(finish.X - 12., finish.Y); finish |]
-            for i in 1..route.Length - 1 do context.DrawLine(pen, route[i-1], route[i])
-            context.DrawLine(pen, Point(finish.X - 6., finish.Y - 4.), finish)
-            context.DrawLine(pen, Point(finish.X - 6., finish.Y + 4.), finish)
-        for edge in pairs do
-            if edge.Source <> active && edge.Destination <> active then draw edge
-        for edge in pairs do
-            if edge.Source = active || edge.Destination = active then draw edge
+let private drawLinks (nodes: Node array) (pairs: Link array) active (context: DrawingContext) =
+    let draw (edge: Link) =
+        let fromNode, toNode = nodes[edge.Source], nodes[edge.Destination]
+        let a, b = origin fromNode, origin toNode
+        let start = Point(a.X + width, a.Y + height / 2.)
+        let finish = Point(b.X, b.Y + height / 2.)
+        let selected = edge.Source = active || edge.Destination = active
+        let pen = Pen((if selected then Brushes.SteelBlue else Brushes.Gray), (if selected then 2. else 1.))
+        let route =
+            if toNode.Column = fromNode.Column + 1 then
+                [| start; Point(start.X + 8., start.Y); Point(finish.X - 12., finish.Y); finish |]
+            else
+                // Return edges use the space above a row, including self loops.
+                let y = min a.Y b.Y - 12.
+                [| start; Point(start.X + 12., start.Y); Point(start.X + 12., y)
+                   Point(finish.X - 12., y); Point(finish.X - 12., finish.Y); finish |]
+        for i in 1..route.Length - 1 do context.DrawLine(pen, route[i-1], route[i])
+        context.DrawLine(pen, Point(finish.X - 6., finish.Y - 4.), finish)
+        context.DrawLine(pen, Point(finish.X - 6., finish.Y + 4.), finish)
+    for edge in pairs do
+        if edge.Source <> active && edge.Destination <> active then draw edge
+    for edge in pairs do
+        if edge.Source = active || edge.Destination = active then draw edge
 
-let create analysis =
+let create (subscriptions: Subscriptions.Group) analysis =
     let nodes, links = project analysis
     let canvas = Canvas(Width = (nodes |> Array.maxBy _.Column |> origin).X + width + 20.,
                         Height = (nodes |> Array.maxBy _.Row |> origin).Y + height + 20.)
-    let lines = Lines(nodes, links, Width = canvas.Width, Height = canvas.Height)
+    let pairs = links |> Array.distinctBy (fun edge -> edge.Source, edge.Destination)
+    let mutable active = 0
+    let lines = new MyDebugTools.Contracts.DrawingSurface((fun ctx -> drawLinks nodes pairs active ctx),
+                                                           Width = canvas.Width, Height = canvas.Height)
+    subscriptions.Add lines
     canvas.Children.Add lines
     let details = StackPanel(Spacing = 3., Margin = Thickness(4.))
     let detail text = details.Children.Add(TextBlock(Text = text, TextWrapping = TextWrapping.Wrap))
     let buttons = ResizeArray<Button>()
-    let mutable active = 0
     let select index =
         buttons[active].FontWeight <- FontWeight.Normal
         active <- index
         buttons[index].FontWeight <- FontWeight.Bold
-        lines.Select index
+        lines.InvalidateVisual()
         details.Children.Clear()
         detail nodes[index].Detail
         for link in links do
@@ -114,7 +110,7 @@ let create analysis =
         let pos = origin node
         Canvas.SetLeft(button, pos.X)
         Canvas.SetTop(button, pos.Y)
-        button.Click.Add(fun _ -> select index)
+        button.Click.Subscribe(fun _ -> select index) |> subscriptions.Add
         buttons.Add button
         canvas.Children.Add button
     select 0

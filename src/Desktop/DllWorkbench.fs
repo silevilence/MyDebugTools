@@ -22,6 +22,8 @@ let private row (controls: Control list) =
 let plugin (window: Window) (host: Host) =
     { new IDesktopPlugin with
         member _.Activate registry =
+            let tabPoint = { DllTabPoint.PageId = "dll.debugger"; PointId = "tabs"; Version = 1 }
+            registry.DllTabPoint tabPoint
             let mutable session: CallSession option = None
             let restart () =
                 session |> Option.iter (fun s -> s.Dispose())
@@ -151,7 +153,7 @@ let plugin (window: Window) (host: Host) =
                     tabs.Items.Add(tabItem "导出" (ScrollViewer(Content = panel))) |> ignore
                     tabs.SelectedIndex <- 0
                     let syncTabs () =
-                        let wanted = host.DllTabs |> List.map snd
+                        let wanted = host.DllTabs(tabPoint.PageId, tabPoint.PointId)
                         for tab, item, view in mounted.ToArray() do
                             if wanted |> List.exists (fun t -> obj.ReferenceEquals(t, tab)) |> not then
                                 if item.IsSelected then tabs.SelectedIndex <- 0

@@ -21,16 +21,26 @@ type Host() =
     let active = Dictionary<string, PluginHandle>()
     let pages = Dictionary<string, Page>()
     let dllTabs = ResizeArray<string * DllTab>()
+    let tabPoints = Dictionary<string * string, DllTabPoint>()
     let tabsChanged = Event<unit>()
 
     let monitors = Dictionary<string, MonitorSession>()
     let points = Dictionary<string * string, MenuPoint>()
     let extensions = ResizeArray<string * MenuExtension>()
-    let compatible (point: MenuPoint) (action: MenuExtension) =
-        point.Version >= action.MinVersion && point.Version <= action.MaxVersion
+    let compatible version minimum maximum = version >= minimum && version <= maximum
+    let mismatch title page point minimum maximum actual =
+        let required = if minimum = maximum then string minimum else $"{minimum}–{maximum}"
+        $"{title} · {page}/{point}：要求版本 {required}，实际版本 {actual}"
 
     member _.Target with get() = target and set value = target <- value
-    member _.DllTabs = dllTabs |> Seq.toList
+    member _.DllTabs(pageId, pointId) = [
+        match tabPoints.TryGetValue((pageId, pointId)) with
+        | true, point ->
+            for _, tab in dllTabs do
+                if tab.PageId = pageId && tab.PointId = pointId && compatible point.Version tab.MinVersion tab.MaxVersion then
+                    yield tab
+        | _ -> ()
+    ]
     member _.DllTabsChanged = tabsChanged.Publish
 
     member _.Monitor id = match monitors.TryGetValue id with true, session -> Some session | _ -> None
@@ -38,7 +48,7 @@ type Host() =
     member _.Actions pageId = [
         for _, extension in extensions do
             match points.TryGetValue((pageId, extension.PointId)) with
-            | true, point when extension.PageId = pageId && compatible point extension ->
+            | true, point when extension.PageId = pageId && compatible point.Version extension.MinVersion extension.MaxVersion ->
                 yield extension.Title, fun () -> extension.Invoke(point.Selection())
             | _ -> ()
     ]
@@ -47,11 +57,14 @@ type Host() =
         for id, extension in extensions do
             if id = owner then
                 match points.TryGetValue((extension.PageId, extension.PointId)) with
-                | true, point when not (compatible point extension) ->
-                    let required =
-                        if extension.MinVersion = extension.MaxVersion then string extension.MinVersion
-                        else $"{extension.MinVersion}–{extension.MaxVersion}"
-                    yield $"{extension.Title} · {point.PageId}/{point.PointId}：要求版本 {required}，实际版本 {point.Version}"
+                | true, point when not (compatible point.Version extension.MinVersion extension.MaxVersion) ->
+                    yield mismatch extension.Title point.PageId point.PointId extension.MinVersion extension.MaxVersion point.Version
+                | _ -> ()
+        for id, tab in dllTabs do
+            if id = owner then
+                match tabPoints.TryGetValue((tab.PageId, tab.PointId)) with
+                | true, point when not (compatible point.Version tab.MinVersion tab.MaxVersion) ->
+                    yield mismatch tab.Title point.PageId point.PointId tab.MinVersion tab.MaxVersion point.Version
                 | _ -> ()
     ]
 
@@ -67,6 +80,7 @@ type Host() =
             let declared = ResizeArray<MenuPoint>()
             let actions = ResizeArray<MenuExtension>()
             let tabs = ResizeArray<DllTab>()
+            let tabDeclarations = Dictionary<string * string, DllTabPoint>()
             let mutable monitor = None
             let resources = Stack<IDisposable>()
             let release () =
@@ -81,6 +95,10 @@ type Host() =
                     new Registration with
                         member _.CurrentTarget() = target
                         member _.DllTab tab = tabs.Add tab
+                        member _.DllTabPoint point =
+                            let key = point.PageId, point.PointId
+                            if tabPoints.ContainsKey key || not (tabDeclarations.TryAdd(key, point)) then
+                                invalidOp $"扩展点重复：{point.PageId}/{point.PointId}"
                         member _.Page page =
                             if pages.ContainsKey page.Id || Seq.exists (fun (p: Page) -> p.Id = page.Id) additions then
                                 invalidOp $"页面标识重复：{page.Id}"
@@ -94,9 +112,10 @@ type Host() =
                         member _.Monitor session = monitor <- Some session
                         member _.Own resource = resources.Push resource
                 }
-                for point in declared do
-                    if additions |> Seq.exists (fun page -> page.Id = point.PageId) |> not then
-                        invalidOp $"扩展点缺少所属页面：{point.PageId}"
+                let owners = Seq.append (declared |> Seq.map _.PageId) (tabDeclarations.Values |> Seq.map _.PageId)
+                for pageId in owners do
+                    if additions |> Seq.exists (fun page -> page.Id = pageId) |> not then
+                        invalidOp $"扩展点缺少所属页面：{pageId}"
                 let starting = Task.Run(fun () ->
                     let handle = root.Plugin(Action<Context>(fun ctx ->
                         ctx.Effect(Func<obj>(fun () -> box (Action release)), plugin.Id) |> ignore))
@@ -107,11 +126,13 @@ type Host() =
                 for point in declared do points.Add((point.PageId, point.PointId), point)
                 for action in actions do extensions.Add(id, action)
                 for tab in tabs do dllTabs.Add(id, tab)
+                for KeyValue(key, point) in tabDeclarations do tabPoints.Add(key, point)
                 monitor |> Option.iter (fun session -> monitors.Add(id, session))
                 resources.Push { new IDisposable with
                                     member _.Dispose() =
                                         monitors.Remove id |> ignore
                                         dllTabs.RemoveAll(fun (owner, _) -> owner = id) |> ignore
+                                        for key in tabDeclarations.Keys do tabPoints.Remove key |> ignore
                                         for point in declared do points.Remove((point.PageId, point.PointId)) |> ignore
                                         extensions.RemoveAll(fun (owner, _) -> owner = id) |> ignore
                                         for page in additions do pages.Remove page.Id |> ignore }

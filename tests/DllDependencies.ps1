@@ -3,6 +3,7 @@ function Check-DllDependencies {
     $dir = (Resolve-Path (Join-Path $DllFixtures 'dependencies')).Path
     $treeItem = [Windows.Automation.ControlType]::TreeItem
     $listItem = [Windows.Automation.ControlType]::ListItem
+    $tabItem = [Windows.Automation.ControlType]::TabItem
     $select = [Windows.Automation.SelectionItemPattern]::Pattern
     $expand = [Windows.Automation.ExpandCollapsePattern]::Pattern
     $value = [Windows.Automation.ValuePattern]::Pattern
@@ -22,7 +23,7 @@ function Check-DllDependencies {
     }
     function Branch($name) { (Wait-Element $name $treeItem).GetCurrentPattern($expand).Expand() }
     function Use-Dependencies {
-        (Wait-Element '依赖' $listItem).GetCurrentPattern($select).Select()
+        (Wait-Element '依赖' $tabItem).GetCurrentPattern($select).Select()
     }
     function Check-ChoiceTree($variant) {
         Branch "Choice.dll · 普通导入 · $dir\$variant\Choice.dll · x64"
@@ -52,7 +53,11 @@ function Check-DllDependencies {
         throw 'Cycle must terminate the branch'
     }
     Branch "Later.dll · 延迟导入 · $dir\Later.dll · x64"
-    [void](Wait-Element $shared $treeItem)
+    $sharedBranch = Wait-Element $shared $treeItem
+    $sharedBranch.GetCurrentPattern($expand).Expand()
+    $byCycle = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, $cycle)
+    if (!$sharedBranch.FindFirst([Windows.Automation.TreeScope]::Descendants, $byCycle)) { throw 'Missing cycle below shared branch' }
+    $sharedBranch = $null
     Use-View '依赖图'
     [void](Wait-Element 'Choice.dll · 未解析' $button)
     Invoke-Control 'SharedLeaf.dll'
@@ -77,7 +82,7 @@ function Check-DllDependencies {
     if (Find-Element 'LeafA.dll' $button) { throw 'Graph retained old child' }
     Use-View '依赖树'
     Check-ChoiceTree 'B'
-    (Wait-Element '导出' $listItem).GetCurrentPattern($select).Select()
+    (Wait-Element '导出' $tabItem).GetCurrentPattern($select).Select()
     [void](Wait-Element '函数入口' $edit)
     Use-Dependencies
     Check-ChoiceTree 'B'
@@ -92,16 +97,29 @@ function Check-DllDependencies {
     Open-Manager
     Invoke-Control '停用 DLL 依赖'
     Invoke-Control 'DLL 工作台' $menuItem
-    if (Find-Element '依赖' $listItem) { throw 'Disabled tab still mounted' }
+    if (Find-Element '依赖' $tabItem) { throw 'Disabled tab still mounted' }
     [void](Wait-Element '函数入口' $edit)
     Open-Manager
+    Invoke-Control '检查卸载'
+    [void](Wait-Element '已回收 1 个旧版本。仍待回收：无' $label)
     Invoke-Control '启用 DLL 依赖'
     Invoke-Control 'DLL 工作台' $menuItem
     Use-Dependencies
     [void](Wait-Element $contract $treeItem)
     $byName = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, '依赖')
     $tabs = @($window.FindAll([Windows.Automation.TreeScope]::Descendants, $byName) |
-        Where-Object { $_.Current.ControlType -eq $listItem })
+        Where-Object { $_.Current.ControlType -eq $tabItem })
     if ($tabs.Count -ne 1) { throw "Expected one dependency tab, got $($tabs.Count)" }
     'PASS current file replacement, local API Set host, independent tab removal and restoration'
+    for ($round = 0; $round -lt 2; $round++) {
+        Open-Manager
+        Invoke-Control '重新加载 DLL 依赖'
+        Invoke-Control 'DLL 工作台' $menuItem
+        Use-Dependencies
+        [void](Wait-Element $contract $treeItem)
+        Open-Manager
+        Invoke-Control '检查卸载'
+        [void](Wait-Element '已回收 1 个旧版本。仍待回收：无' $label)
+    }
+    'PASS two workbench tab reloads with the current DLL and collected prior assemblies'
 }

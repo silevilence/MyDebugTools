@@ -4,10 +4,10 @@ open MyDebugTools.DllDebugger
 
 let moduleLabel (m: DependencyModule) = $"{m.Path} · {m.Architecture}"
 
-let edgeLabel (edge: DependencyEdge) =
+let edgeLabelAs reference (edge: DependencyEdge) =
     let kind = if edge.Delayed then "延迟导入" else "普通导入"
     let relation =
-        match edge.Reference with
+        match reference with
         | DependencyReference.Shared -> " · 共享引用"
         | DependencyReference.Cycle -> " · 循环引用"
         | _ -> ""
@@ -17,3 +17,5 @@ let edgeLabel (edge: DependencyEdge) =
         elif isNull edge.ApiSetHost then " · API Set 合约"
         else $" · API Set 宿主 {edge.ApiSetHost}"
     $"{edge.Name} · {kind}{contract}{relation} · {destination}"
+
+let edgeLabel (edge: DependencyEdge) = edgeLabelAs edge.Reference edge
