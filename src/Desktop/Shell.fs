@@ -135,7 +135,6 @@ type MainWindow() as window =
         menu.Items.Clear()
     let actionResult = TextBlock(Margin = Thickness(24., 0., 24., 8.))
     let workspace = Workspace(window)
-    let updates = Updates.Panel(window)
     let pageArea = workspace.Control
     let views = ShellMenuItem("视图")
     let toolMenu = ShellMenuItem("工具")
@@ -152,6 +151,7 @@ type MainWindow() as window =
     let home = StackPanel(Spacing = 8.)
     let homeMessage = TextBlock(TextWrapping = Media.TextWrapping.Wrap)
     let mutable opening = false
+    let updates = Updates.Panel(window, host, fun () -> manager.IsEnabled && not opening)
 
     let confirmStop target verb = task {
         let dialog = Window(Title = verb + "插件", Width = 460., Height = 180.,

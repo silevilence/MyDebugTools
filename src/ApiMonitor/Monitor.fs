@@ -222,7 +222,12 @@ type Plugin() =
     interface IDesktopPlugin with
         member _.Activate reg =
             let active () = CaptureHistory.Sessions() |> Array.filter (fun s -> not s.Completion.IsCompleted)
-            let stop () = active() |> Array.map (fun s -> s.StopAsync()) |> Task.WhenAll
+            let stop () : Task = task {
+                let sessions = active()
+                do! sessions |> Array.map (fun s -> s.StopAsync()) |> Task.WhenAll
+                for s in sessions do
+                    if s.Status <> "已结束" then invalidOp $"{s} · {s.Status}"
+            }
             reg.Monitor { Target = fun () ->
                               match active() with
                               | [||] -> None

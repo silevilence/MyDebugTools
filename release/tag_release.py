@@ -58,7 +58,7 @@ def sha(data):
 
 
 def asset_names(version):
-    return {f"MyDebugTools-{version}-win-x64.exe"}
+    return {f"MyDebugTools-{version}-win-x64.exe", "appcast.xml", "appcast.xml.signature"}
 
 
 def records(assets):

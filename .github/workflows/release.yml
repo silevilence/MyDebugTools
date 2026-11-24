@@ -27,6 +27,14 @@ jobs:
       - name: 核对标签、项目版本和发布记录
         id: release
         run: python release/tag_release.py prepare
+      - name: 提取宿主更新公钥
+        if: steps.release.outputs.build == 'true'
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          $key = node release/sign-update.mjs public
+          if ($LASTEXITCODE) { throw '无法读取 UPDATE_SIGNING_KEY' }
+          "UpdatePublicKey=$key" >> $env:GITHUB_ENV
       - name: 发布 x64 宿主和后台组件
         if: steps.release.outputs.build == 'true'
         run: dotnet publish src/Desktop/MyDebugTools.fsproj -c Release --no-self-contained -o artifacts/release/publish
@@ -39,6 +47,11 @@ jobs:
       - name: 生成 NSIS 安装包
         if: steps.release.outputs.build == 'true'
         run: ./release/Build-Installer.ps1 -Publish artifacts/release/publish -Version '${{ steps.release.outputs.version }}' -OutputDirectory artifacts/release/assets
+      - name: 签署安装包和更新清单
+        if: steps.release.outputs.build == 'true'
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: node release/sign-update.mjs artifacts/release/assets $env:GITHUB_REF_NAME "https://github.com/$env:GITHUB_REPOSITORY/releases" artifacts/release/notes.md
       - name: 核对草稿资产并公开
         if: steps.release.outputs.build == 'true'
         run: python release/tag_release.py publish
