@@ -35,41 +35,56 @@ module private View =
         let chosen = ListBox(Height = 80.)
         AutomationProperties.SetAutomationId(chosen, "chosen-functions")
         let selected = ResizeArray<MonitorFunction>()
+        let selectionChanged = Event<unit>()
+        let count = TextBlock()
+        let sourceName = TextBlock(Text = "函数来源 · Windows SDK")
+        let clear = button "清除搜索" (fun () -> query.Text <- "")
         let add = button "加入监控" (fun () ->
             match results.SelectedItem with
             | :? MonitorFunction as f when f.Selectable && not (selected.Contains f) ->
                 selected.Add f
                 chosen.ItemsSource <- selected.ToArray()
+                selectionChanged.Trigger()
             | _ -> ())
         let remove = button "移除选中函数" (fun () ->
             match chosen.SelectedItem with
             | :? MonitorFunction as f ->
                 selected.Remove f |> ignore
                 chosen.ItemsSource <- selected.ToArray()
+                selectionChanged.Trigger()
             | _ -> ())
-        results.SelectionChanged.Add(fun _ ->
+        let update () =
+            count.Text <- $"已选 {selected.Count} 个监控函数"
+            remove.IsEnabled <- chosen.SelectedIndex >= 0
             match results.SelectedItem with
             | :? MonitorFunction as f ->
                 details.Text <- f.Details
-                add.IsEnabled <- f.Selectable
+                add.IsEnabled <- f.Selectable && not (selected.Contains f)
+                if selected.Contains f then details.Text <- details.Text + " · 已加入"
             | _ ->
-                details.Text <- ""
-                add.IsEnabled <- false)
+                details.Text <- $"{sourceName.Text} · 没有匹配项。可清除搜索或切换来源。"
+                add.IsEnabled <- false
+        results.SelectionChanged.Add(fun _ -> update())
+        chosen.SelectionChanged.Add(fun _ -> update())
+        selectionChanged.Publish.Add(fun () -> update())
         let search () =
             results.ItemsSource <- source |> Array.filter (fun f ->
                 (f.Module + "!" + f.Signature.Entry).Contains(string query.Text, StringComparison.OrdinalIgnoreCase))
             results.SelectedIndex <- 0
+            update()
         query.TextChanged.Add(fun _ -> search())
         search()
         let load = button "读取 DLL 导出" (fun () ->
             try
                 let image = DllImage.Open dll.Text
+                sourceName.Text <- $"函数来源 · {IO.Path.GetFileName image.Path}"
                 source <- image.Exports |> Seq.map (fun e -> MonitorFunction.FromExport(image, e, store)) |> Seq.toArray
                 query.Text <- ""
                 search()
                 message.Text <- image.Path
             with e -> message.Text <- e.Message)
         let sdk = button "使用 SDK 目录" (fun () ->
+            sourceName.Text <- "函数来源 · Windows SDK"
             source <- installed
             query.Text <- ""
             search())
@@ -110,30 +125,47 @@ module private View =
         let start = button "启动并监控" (fun () -> track (fun () ->
             CaptureSession.Launch(exe.Text, string args.Text, architecture (Targets.forFile exe.Text), selected)))
         let pid = input "目标进程 ID"
+        let mode = ComboBox(ItemsSource = [|"启动程序"; "附加进程"|], SelectedIndex = 0)
+        AutomationProperties.SetName(mode, "监控目标模式")
         let mutable previousTarget = None
         panel.AttachedToVisualTree.Add(fun _ ->
             let currentTarget = target()
             if currentTarget <> previousTarget then
                 previousTarget <- currentTarget
                 match currentTarget |> Option.map _.Source with
-                | Some (ProcessId id) -> pid.Text <- string id
+                | Some (ProcessId id) -> mode.SelectedIndex <- 1; pid.Text <- string id
                 | _ -> ())
         let attach = button "附加并监控" (fun () -> track (fun () ->
-            let id = Int32.Parse pid.Text
+            let id =
+                match Int32.TryParse pid.Text with
+                | true, n when n > 0 -> n
+                | _ -> invalidOp "请输入大于 0 的进程 ID。"
             CaptureSession.Attach(id, architecture (Targets.forProcess id), selected)))
         let stop = button "停止所选会话" (fun () ->
             match history.SelectedItem with
             | :? CaptureSession as s -> s.StopAsync() |> ignore
             | _ -> ())
+        let prepare () =
+            let launching = mode.SelectedIndex = 0
+            for c in [exe :> Control; args; start] do c.IsVisible <- launching
+            for c in [pid :> Control; attach] do c.IsVisible <- not launching
+            start.IsEnabled <- selected.Count > 0 && not (String.IsNullOrWhiteSpace exe.Text)
+            attach.IsEnabled <- selected.Count > 0 && not (String.IsNullOrWhiteSpace pid.Text)
+            stop.IsEnabled <- match history.SelectedItem with :? CaptureSession as s -> not s.Completion.IsCompleted | _ -> false
+        mode.SelectionChanged.Add(fun _ -> prepare())
+        exe.TextChanged.Add(fun _ -> prepare())
+        pid.TextChanged.Add(fun _ -> prepare())
+        selectionChanged.Publish.Add(fun () -> prepare())
+        prepare()
         history.ItemsSource <- CaptureHistory.Sessions()
         history.SelectedIndex <- history.ItemCount - 1
         let timer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 400.)
-        timer.Tick.Add(fun _ -> refresh())
+        timer.Tick.Add(fun _ -> refresh(); prepare())
         panel.AttachedToVisualTree.Add(fun _ -> timer.Start())
         panel.DetachedFromVisualTree.Add(fun _ -> timer.Stop())
         let controls: Control list =
-            [ TextBlock(Text = "API 监控", FontSize = 24.); dll; load; sdk; query; results; details; add
-              TextBlock(Text = "监控函数"); chosen; remove; exe; args; start; pid; attach; message
+            [ TextBlock(Text = "API 监控", FontSize = 24.); sourceName; sdk; dll; load; query; clear; results; details; add
+              count; chosen; remove; TextBlock(Text = "选择目标"); mode; exe; args; start; pid; attach; message
               TextBlock(Text = "采集会话"); history; stop; state; calls; detail ]
         controls |> List.iter panel.Children.Add
         ScrollViewer(Content = panel) :> Control
