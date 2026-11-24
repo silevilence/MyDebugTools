@@ -25,8 +25,11 @@ type BodyEditor(events: Events) =
                          raw; format; diagnostic ]
     let path = field "二进制文件路径"
     let binary = stack [ path; browseFile events path ]
+    let editFields = Event<unit>()
+    let edit = button events "编辑正文字段" (fun () -> editFields.Trigger())
     let instructions = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
     let refresh () =
+        edit.IsVisible <- kind.SelectedIndex = 2 || kind.SelectedIndex = 3
         fields.IsVisible <- kind.SelectedIndex = 1
         binary.IsVisible <- kind.SelectedIndex = 4
         instructions.IsVisible <- kind.SelectedIndex = 2 || kind.SelectedIndex = 3
@@ -39,7 +42,8 @@ type BodyEditor(events: Events) =
         syntax()
         events.Watch(media.TextChanged.Subscribe(fun _ -> syntax()))
         events.Watch(kind.SelectionChanged.Subscribe(fun _ -> refresh()))
-    member _.Content = stack [ kind; fields; instructions; binary ]
+    member _.EditFields = editFields.Publish
+    member _.Content = stack [ TextBlock(Text = "正文类型"); kind; fields; instructions; edit; binary ]
     member _.Read() =
         { Kind = string kind.SelectedItem; MediaType = value media
           Text = match kind.SelectedIndex with 1 -> raw.Text | 4 -> value path | _ -> "" }

@@ -35,7 +35,13 @@ type Plugin() =
                     let responseView = ResponseView(events)
                     let response = tab "响应" responseView.Content
                     let tabs = TabControl()
-                    let paramsTab = tab "参数" (parameters.Content(events))
+                    let paramsContent = stack [parameters.Content(events)]
+                    let paramsTab = tab "参数" paramsContent
+                    let bodyTab = tab "正文" body.Content
+                    let back = button events "返回正文" (fun () -> tabs.SelectedItem <- bodyTab)
+                    back.IsVisible <- false
+                    paramsContent.Children.Insert(0, back)
+                    body.EditFields.Add(fun () -> back.IsVisible <- true; tabs.SelectedItem <- paramsTab)
                     let capture () =
                         { Library.blank with Method = value methodBox; Url = value url
                                              Parameters = parameters.Definitions(); Body = body.Read() }
@@ -47,7 +53,7 @@ type Plugin() =
                         tabs.SelectedItem <- paramsTab
                     let definitions = Definitions(events, capture, apply, fun msg -> status.Text <- msg)
                     tabs.Items.Add(paramsTab) |> ignore
-                    tabs.Items.Add(tab "正文" body.Content) |> ignore
+                    tabs.Items.Add(bodyTab) |> ignore
                     tabs.Items.Add(tab "接口定义" definitions.Content) |> ignore
                     tabs.Items.Add response |> ignore
                     let history = HistoryView(events, dataDir, fun msg -> status.Text <- msg)
@@ -77,8 +83,7 @@ type Plugin() =
                             try
                                 let! reply = sender.Send(methodName, address, args, payload, source, TimeSpan.FromSeconds(float seconds), stop.Token)
                                 status.Text <- $"{reply.Summary} · {reply.ElapsedMs} ms"
-                                responseView.Show(reply)
-                                tabs.SelectedItem <- response
+                                responseView.Show(reply, methodName + " " + address)
                             finally
                                 current <- None
                                 cancel.IsEnabled <- false
@@ -86,9 +91,13 @@ type Plugin() =
                         with e -> status.Text <- e.Message
                     }
                     events.Watch(sendButton.Click.Subscribe(fun _ -> send() |> ignore))
+                    sendButton.Classes.Add("accent")
                     let toolbar = stack [
-                        row [ TextBlock(Text = "方法"); methodBox; TextBlock(Text = "超时（秒）"); timeout; sendButton; cancel ]
-                        url; status
+                        TextBlock(Text = "发送 HTTP 请求", FontSize = 24.)
+                        row [ TextBlock(Text = "方法"); methodBox; TextBlock(Text = "超时（秒）"); timeout ]
+                        TextBlock(Text = "URL"); url
+                        row [sendButton; cancel; button events "查看响应" (fun () -> tabs.SelectedItem <- response)]
+                        status
                     ]
                     DockPanel.create [
                         DockPanel.children [

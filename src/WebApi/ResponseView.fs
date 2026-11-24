@@ -11,6 +11,7 @@ type ResponseView(events: Events) =
     let code = SyntaxEditor(IsReadOnly = true) |> named "格式化响应"
     let preview = StackPanel(Spacing = 6.)
     let message = TextBlock(TextWrapping = TextWrapping.Wrap)
+    let subject = SelectableTextBlock(Text = "尚未发送请求。", TextWrapping = TextWrapping.Wrap)
     let host = ContentControl()
     let mutable media = ""
     let original = button events "原文" (fun () -> host.Content <- raw; message.Text <- "")
@@ -32,18 +33,22 @@ type ResponseView(events: Events) =
             if tag = "pre" then block.FontFamily <- FontFamily("Consolas")
             preview.Children.Add block
         host.Content <- preview)
+    let result = stack [ TextBlock(Text = "响应头"); headers; row [original; formatted; html]; message; host ]
     do
+        result.IsVisible <- false
         headers.IsReadOnly <- true
         raw.IsReadOnly <- true
         formatted.IsVisible <- false
         html.IsVisible <- false
         host.Content <- raw
-    member _.Content = stack [ TextBlock(Text = "响应头"); headers; row [original; formatted; html]; message; host ]
-    member _.Show(reply: Reply) =
+    member _.Content = stack [subject; result]
+    member _.Show(reply: Reply, request: string) =
+        subject.Text <- $"{request} · {reply.Summary} · {reply.ElapsedMs} ms"
+        result.IsVisible <- reply.Status.IsSome
         media <- Presentation.language reply.MediaType
         headers.Text <- reply.Headers
         raw.Text <- reply.Raw
-        message.Text <- ""
+        message.Text <- if reply.Status.IsSome && reply.Raw = "" then "此响应没有正文。" else ""
         formatted.IsVisible <- media = ".json" || media = ".xml"
         html.IsVisible <- (media = ".html")
         host.Content <- raw

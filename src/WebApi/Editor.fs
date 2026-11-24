@@ -97,9 +97,9 @@ type Parameters() =
               Description = value description; DefaultValue = value defaultValue },
             { Name = key; Location = position; Value = value actual }
         let line = stack [
-            row [ location; name; TextBlock(Text = "实参"); actual; browse ]
+            row [ stack [TextBlock(Text = "位置"); location]; stack [TextBlock(Text = "参数名"); name]; stack [TextBlock(Text = "本次实参"); actual]; browse ]
             Expander(Header = "参数定义", Content = row [
-                TextBlock(Text = "默认值"); defaultValue; typeName; required; description ])
+                stack [TextBlock(Text = "保存的默认值"); defaultValue]; stack [TextBlock(Text = "类型"); typeName]; required; stack [TextBlock(Text = "说明"); description] ])
         ]
         let entry = read, handlers
         let remove () =

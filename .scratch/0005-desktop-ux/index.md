@@ -16,7 +16,7 @@ Status: ready-for-agent
 | DLL 导出、签名、调用结果与代码生成 | 已实施，待统一验收 | C、H |
 | DLL 依赖树、图、搜索顺序与未解析原因 | 已实施，待统一验收 | D、H |
 | API 监控准备、运行与会话回看 | 已实施，待统一验收 | E、H |
-| HTTP 请求、正文、接口定义、响应与请求日志 | 待开始 | F、H |
+| HTTP 请求、正文、接口定义、响应与请求日志 | 已实施，待统一验收 | F、H |
 | 诊断复制、脱敏和剪贴板失败回退 | 待开始 | H |
 | 共用视觉样式、主题、窗口尺寸与键盘路径 | 待开始 | I |
 | 全部插件表格、界面提供方与扩展层级 | 已实施，待统一验收 | G、J |
@@ -48,7 +48,7 @@ Status: ready-for-agent
 | [0005-13 从缺失依赖追到引用方](issues/13-trace-missing-dependency.md) | 无 | 已实施，待统一验收 |
 | [0005-14 选好函数和目标再开始监控](issues/14-prepare-api-monitor.md) | 无 | 已实施，待统一验收 |
 | [0005-15 持续阅读、筛选和回看采集记录](issues/15-read-monitor-session.md) | 无 | 已实施，待统一验收 |
-| [0005-16 编辑并发送一次 HTTP 请求](issues/16-compose-http-request.md) | 无 | 待开始 |
+| [0005-16 编辑并发送一次 HTTP 请求](issues/16-compose-http-request.md) | 无 | 已实施，待统一验收 |
 | [0005-17 在定义、草稿与请求日志间切换](issues/17-preserve-http-drafts.md) | 无 | 待开始 |
 | [0005-18 在 Dock 中对照输入与结果](issues/18-dock-debug-results.md) | 08 | 待开始 |
 | [0005-19 从各工具复制可用的错误报告](issues/19-copy-tool-diagnostics.md) | 02 | 待开始 |
