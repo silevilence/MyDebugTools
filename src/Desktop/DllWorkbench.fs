@@ -61,6 +61,9 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                     AutomationProperties.SetName(arguments, "调用参数")
                     let bindings = BindingPanel.Panel(window.Clipboard, window.StorageProvider, (fun () -> image),
                                                       (fun () -> editor.Read entry.Text), (fun () -> arguments.Text), store)
+                    editor.Changed.Add(fun () -> bindings.Invalidate())
+                    for field in [entry; arguments] do
+                        field.PropertyChanged.Add(fun e -> if e.Property = TextBox.TextProperty then bindings.Invalidate())
                     let drafts = Collections.Generic.Dictionary<string * string, _>()
                     let mutable activeKey = None
                     let mutable dirty = false
@@ -149,6 +152,7 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                         try
                             let parsed = CDeclaration.Parse(declaration.Text, entry.Text)
                             entry.Text <- parsed.Signature.Entry
+                            bindings.Invalidate()
                             editor.Load parsed.Signature
                             dirty <- true
                             signatureStatus.Text <- String.concat "　" (Array.append [| "来自 C 声明 · 待确认" |] parsed.Notes)
