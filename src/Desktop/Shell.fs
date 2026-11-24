@@ -232,7 +232,9 @@ type MainWindow() as window =
                         if reload || not enabled then do! catalog.EnableAsync(id, detach)
                         else detach()
                         feedback.Text <- ""
-                with e -> feedback.Text <- e.GetBaseException().Message
+                with e ->
+                    feedback.Text <- e.GetBaseException().Message
+                    managerDiagnostic.Show("插件管理", (if reload then "重新加载" else "更改启用状态"), id, feedback.Text)
             finally
                 refresh()
                 manager.IsEnabled <- true

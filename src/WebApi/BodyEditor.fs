@@ -8,21 +8,23 @@ type BodyEditor(events: Events) =
     let kind = choice "正文类型" [| "空"; "原始文本"; "URL 编码表单"; "multipart"; "二进制文件" |]
     let media = field "内容类型"
     let raw = SyntaxEditor() |> named "请求正文"
+    let report = DiagnosticPanel()
     let diagnostic = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
     let format = button events "格式化 JSON" (fun () ->
         match Presentation.formatJson raw.Text with
-        | Ok text -> raw.Text <- text; diagnostic.Text <- ""
+        | Ok text -> raw.Text <- text; diagnostic.Text <- ""; report.Clear()
         | Error problem ->
             raw.Focus() |> ignore
             raw.Select(problem.Offset, min 1 (raw.Text.Length - problem.Offset))
-            diagnostic.Text <- problem.Message)
+            diagnostic.Text <- problem.Message
+            report.Show("Web API 正文", "格式化 JSON", "请求正文", problem.Message.Split(" · ")[0] + " · JSON 语法错误"))
     let syntax () =
         let lang = Presentation.language (value media)
         raw.SetLanguage(lang)
         format.IsVisible <- (lang = ".json")
         diagnostic.Text <- ""
     let fields = stack [ TextBlock(Text = "内容类型"); media; TextBlock(Text = "原文（正文参数使用 {参数名}）")
-                         raw; format; diagnostic ]
+                         raw; format; diagnostic; report.Control ]
     let path = field "二进制文件路径"
     let binary = stack [ path; browseFile events path ]
     let editFields = Event<unit>()

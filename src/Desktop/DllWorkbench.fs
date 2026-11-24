@@ -56,6 +56,7 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                     let mutable image: DllImage option = None
                     let editor = SignatureEditor.Editor()
                     let entry = TextBox(PlaceholderText = "导出名或 #序号")
+                    let diagnostic = DiagnosticPanel()
                     let signatureStatus = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
                     let store = SignatureStore(IO.Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "signatures"))
                     let arguments = TextBox(Text = "{}", AcceptsReturn = true)
@@ -158,7 +159,9 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                             editor.Load parsed.Signature
                             dirty <- true
                             signatureStatus.Text <- String.concat "　" (Array.append [| "来自 C 声明 · 待确认" |] parsed.Notes)
-                        with e -> signatureStatus.Text <- e.Message))
+                        with e ->
+                            signatureStatus.Text <- e.Message
+                            diagnostic.Show("DLL 工作台", "核对签名", string entry.Text, e.Message)))
                     panel.Children.Add editor.Panel
                     panel.Children.Add(button "确认并保存签名" (fun () ->
                         try
@@ -168,8 +171,11 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                             dirty <- false
                             drafts.Remove((dll.Identity, entry.Text)) |> ignore
                             selectEntry()
-                        with e -> signatureStatus.Text <- e.Message))
+                        with e ->
+                            signatureStatus.Text <- e.Message
+                            diagnostic.Show("DLL 工作台", "核对签名", string entry.Text, e.Message)))
                     panel.Children.Add signatureStatus
+                    panel.Children.Add diagnostic.Control
                     let callFields = StackPanel(Spacing = 4.)
                     let callContext = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
                     let resultSummary = SelectableTextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
@@ -221,7 +227,10 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                                 let outputs = result.Outputs |> Seq.map (fun kv -> $"{kv.Key} = {kv.Value}") |> String.concat "、"
                                 resultSummary.Text <- $"返回值 · {result.Result}　输出参数 · {outputs}"
                                 output.Text <- result.Display()
-                            with e -> resultSummary.Text <- ""; output.Text <- e.Message
+                            with e ->
+                                resultSummary.Text <- ""
+                                output.Text <- e.Message
+                                diagnostic.Show("DLL 工作台", "调用函数", string entry.Text, $"{e.GetType().Name} · 0x{e.HResult:X8} · 请核对签名和实参。")
                             panel.IsEnabled <- true
                         } |> ignore
                     panel.Children.Add(row [

@@ -86,6 +86,7 @@ module internal View =
         AutomationProperties.SetName(modes, "依赖视图")
         let mutable views: Lazy<Control * (unit -> unit)> array = [||]
         let mutable key: (string * string * bool) option = None
+        let diagnosis = DiagnosticPanel()
         let chainBox = TextBox(IsReadOnly = true, TextWrapping = Avalonia.Media.TextWrapping.Wrap)
         AutomationProperties.SetName(chainBox, "引用链与命中路径")
         let missing = ComboBox(MaxWidth = 320.)
@@ -107,6 +108,7 @@ module internal View =
             views <- [||]
             missing.ItemsSource <- null
             chainBox.Text <- ""
+            diagnosis.Clear()
             content.Content <- TextBlock(Text = $"正在分析依赖 · {path}")
             let search = folders |> Seq.toArray
             task {
@@ -132,6 +134,10 @@ module internal View =
                             let mutable selected = key |> Option.bind (fun k -> match paths.TryGetValue k with true, e -> Some e | _ -> None)
                             let pick value =
                                 selected <- value
+                                match value with
+                                | Some (e: DependencyEdge) when isNull e.Target ->
+                                    diagnosis.Show("DLL 依赖", "解析导入", IO.Path.GetFileName(parents[e]) + " → " + e.Name, e.Problem)
+                                | _ -> diagnosis.Clear()
                                 key <- value |> Option.map (fun e -> parents[e], e.Name, e.Delayed)
                                 chainBox.Text <- match value with
                                                  | None -> result.Root.Path
@@ -197,6 +203,7 @@ module internal View =
         header.Children.Add(TextBlock(Text = "未解析导入 · 选择后定位"))
         header.Children.Add missing
         header.Children.Add chainBox
+        header.Children.Add diagnosis.Control
         let close () =
             let release () =
                 cancel()

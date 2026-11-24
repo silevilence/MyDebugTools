@@ -28,6 +28,7 @@ module private View =
         let store = SignatureStore(IO.Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "signatures"))
         let installed = WindowsApi.Installed()
         let mutable source = installed
+        let diagnosis = DiagnosticPanel()
         let message = TextBlock(TextWrapping = TextWrapping.Wrap)
         let results = ListBox(Height = 130.)
         let details = TextBlock(TextWrapping = TextWrapping.Wrap)
@@ -130,16 +131,19 @@ module private View =
         let clearRecords = button "清除记录筛选" (fun () -> functionFilter.Text <- ""; threadFilter.Text <- "")
         calls.SelectionChanged.Add(fun _ -> showDetail())
         history.SelectionChanged.Add(fun _ -> refresh())
-        let track beginCapture =
+        let track action subject beginCapture =
+            diagnosis.Clear()
             try
                 let s = beginCapture()
                 CaptureHistory.Add s
                 history.ItemsSource <- CaptureHistory.Sessions()
                 history.SelectedItem <- s
                 message.Text <- ""
-            with e -> message.Text <- e.Message
+            with e ->
+                message.Text <- e.Message + "。请核对目标后重试。"
+                diagnosis.Show("API 监控", action, subject, e.Message)
         let architecture = function X86 -> "x86" | X64 -> "x64"
-        let start = button "启动并监控" (fun () -> track (fun () ->
+        let start = button "启动并监控" (fun () -> track "启动采集" (string exe.Text) (fun () ->
             CaptureSession.Launch(exe.Text, string args.Text, architecture (Targets.forFile exe.Text), selected)))
         let pid = input "目标进程 ID"
         let mode = ComboBox(ItemsSource = [|"启动程序"; "附加进程"|], SelectedIndex = 0)
@@ -152,7 +156,7 @@ module private View =
                 match currentTarget |> Option.map _.Source with
                 | Some (ProcessId id) -> mode.SelectedIndex <- 1; pid.Text <- string id
                 | _ -> ())
-        let attach = button "附加并监控" (fun () -> track (fun () ->
+        let attach = button "附加并监控" (fun () -> track "附加采集" ("PID " + string pid.Text) (fun () ->
             let id =
                 match Int32.TryParse pid.Text with
                 | true, n when n > 0 -> n
@@ -182,7 +186,7 @@ module private View =
         panel.DetachedFromVisualTree.Add(fun _ -> timer.Stop())
         let controls: Control list =
             [ TextBlock(Text = "API 监控", FontSize = 24.); sourceName; sdk; dll; load; query; clear; results; details; add
-              count; chosen; remove; TextBlock(Text = "选择目标"); mode; exe; args; start; pid; attach; message
+              count; chosen; remove; TextBlock(Text = "选择目标"); mode; exe; args; start; pid; attach; message; diagnosis.Control
               TextBlock(Text = "采集会话"); history; stop; state; functionFilter; threadFilter; clearRecords; matches; calls; detail ]
         controls |> List.iter panel.Children.Add
         ScrollViewer(Content = panel) :> Control

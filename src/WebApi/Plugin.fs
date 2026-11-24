@@ -33,6 +33,7 @@ type Plugin() =
                     let parameters = new Parameters()
                     registry.Own parameters
                     let body = BodyEditor(events)
+                    let diagnosis = DiagnosticPanel()
                     let status = TextBlock(TextWrapping = TextWrapping.Wrap)
                     let responseView = ResponseView(events)
                     outlet.Set(ScrollViewer(Content = responseView.Content))
@@ -72,6 +73,13 @@ type Plugin() =
                     let cancel = button events "取消请求" (fun () -> current |> Option.iter (fun c -> c.Cancel()))
                     cancel.IsEnabled <- false
                     let send () = task {
+                        let subject () =
+                            let host =
+                                match Uri.TryCreate(value url, UriKind.Absolute) with
+                                | true, uri when uri.Scheme = "http" || uri.Scheme = "https" -> uri.Authority
+                                | _ -> "无有效 HTTP 地址"
+                            $"{value methodBox} · {host}"
+                        diagnosis.Clear()
                         try
                             let args = parameters.Read()
                             let payload = body.Read()
@@ -88,12 +96,17 @@ type Plugin() =
                             try
                                 let! reply = sender.Send(methodName, address, args, payload, source, TimeSpan.FromSeconds(float seconds), stop.Token)
                                 status.Text <- $"{reply.Summary} · {reply.ElapsedMs} ms"
+                                if reply.Status.IsNone then
+                                    diagnosis.Show("Web API", "发送请求", subject(), reply.Summary)
                                 responseView.Show(reply, methodName + " " + address)
                             finally
                                 current <- None
                                 cancel.IsEnabled <- false
                                 sendButton.IsEnabled <- true
-                        with e -> status.Text <- e.Message
+                        with e ->
+                            status.Text <- e.Message
+                            let reason = if e :? InvalidOperationException && e.Message.StartsWith("请") then e.Message.Split('：')[0] else $"{e.GetType().Name} · 输入校验失败 · 0x{e.HResult:X8}"
+                            diagnosis.Show("Web API", "准备请求", subject(), reason)
                     }
                     events.Watch(sendButton.Click.Subscribe(fun _ -> send() |> ignore))
                     sendButton.Classes.Add("accent")
@@ -102,7 +115,7 @@ type Plugin() =
                         row [ TextBlock(Text = "方法"); methodBox; TextBlock(Text = "超时（秒）"); timeout ]
                         TextBlock(Text = "URL"); url
                         row [sendButton; cancel; button events "查看响应" (fun () -> tabs.SelectedItem <- response)]
-                        status
+                        status; diagnosis.Control
                     ]
                     DockPanel.create [
                         DockPanel.children [
