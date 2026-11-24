@@ -78,7 +78,7 @@ let private drawLinks (nodes: Node array) (pairs: Link array) active (context: D
     for edge in pairs do
         if edge.Source = active || edge.Destination = active then draw edge
 
-let create (subscriptions: Subscriptions.Group) analysis =
+let create (subscriptions: Subscriptions.Group) analysis picked =
     let nodes, links = project analysis
     let canvas = Canvas(Width = (nodes |> Array.maxBy _.Column |> origin).X + width + 20.,
                         Height = (nodes |> Array.maxBy _.Row |> origin).Y + height + 20.)
@@ -89,7 +89,7 @@ let create (subscriptions: Subscriptions.Group) analysis =
     subscriptions.Add lines
     canvas.Children.Add lines
     let details = StackPanel(Spacing = 3., Margin = Thickness(4.))
-    let detail text = details.Children.Add(TextBlock(Text = text, TextWrapping = TextWrapping.Wrap))
+    let detail text = details.Children.Add(SelectableTextBlock(Text = text, TextWrapping = TextWrapping.Wrap))
     let buttons = ResizeArray<Button>()
     let select index =
         buttons[active].FontWeight <- FontWeight.Normal
@@ -110,7 +110,9 @@ let create (subscriptions: Subscriptions.Group) analysis =
         let pos = origin node
         Canvas.SetLeft(button, pos.X)
         Canvas.SetTop(button, pos.Y)
-        button.Click.Subscribe(fun _ -> select index) |> subscriptions.Add
+        button.Click.Subscribe(fun _ ->
+            select index
+            links |> Array.tryFind (fun l -> l.Destination = index) |> Option.map _.Import |> picked) |> subscriptions.Add
         buttons.Add button
         canvas.Children.Add button
     select 0
@@ -120,4 +122,6 @@ let create (subscriptions: Subscriptions.Group) analysis =
     let inspector = ScrollViewer(Content = details)
     Grid.SetRow(inspector, 1)
     layout.Children.Add inspector
-    layout
+    layout :> Control, fun (edge: DependencyEdge option) ->
+        let index = edge |> Option.bind (fun e -> links |> Array.tryFind (fun l -> obj.ReferenceEquals(l.Import, e))) |> Option.map _.Destination
+        select (defaultArg index 0)

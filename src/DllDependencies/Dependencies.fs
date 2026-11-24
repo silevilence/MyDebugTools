@@ -14,7 +14,7 @@ open MyDebugTools.Contracts
 open MyDebugTools.DllDebugger
 
 module internal View =
-    let tree (subscriptions: Subscriptions.Group) (result: DependencyAnalysis) =
+    let tree (subscriptions: Subscriptions.Group) (result: DependencyAnalysis) picked =
         let rec populate (parent: TreeViewItem) ancestors (m: DependencyModule) =
             let branch = m :: ancestors
             for edge in m.Imports do
@@ -22,7 +22,9 @@ module internal View =
                     if branch |> List.exists (fun ancestor -> obj.ReferenceEquals(ancestor, edge.Target)) then DependencyReference.Cycle
                     elif edge.Reference = DependencyReference.Cycle then DependencyReference.Shared
                     else edge.Reference
-                let item = ExpandableTreeItem(Labels.edgeLabelAs reference edge)
+                let status = if isNull edge.Target then "未解析" else string reference
+                let item = ExpandableTreeItem($"{edge.Name} · {status}", Tag = edge)
+                ToolTip.SetTip(item, Labels.edgeLabelAs reference edge)
                 if reference <> DependencyReference.Cycle && not (isNull edge.Target) && edge.Target.Imports.Count > 0 then
                     // Populate a branch on its first expansion.
                     item.Items.Add(TreeViewItem()) |> ignore
@@ -39,7 +41,19 @@ module internal View =
         let control = TreeView()
         ScrollViewer.SetHorizontalScrollBarVisibility(control, ScrollBarVisibility.Auto)
         control.Items.Add root |> ignore
-        control
+        control.SelectionChanged.Subscribe(fun _ ->
+            match control.SelectedItem with
+            | :? TreeViewItem as item ->
+                match item.Tag with :? DependencyEdge as edge -> picked (Some edge) | _ -> picked None
+            | _ -> ()) |> subscriptions.Add
+        let locate chain =
+            let mutable parent = root :> TreeViewItem
+            for edge in chain do
+                parent.IsExpanded <- true
+                parent <- parent.Items |> Seq.cast<TreeViewItem> |> Seq.tryFind (fun t -> obj.ReferenceEquals(t.Tag, edge)) |> Option.defaultValue parent
+            parent.IsSelected <- true
+            parent.BringIntoView() |> ignore
+        control :> Control, locate
 
     let create () =
         let tabSubscriptions = Subscriptions.Group()
@@ -70,28 +84,69 @@ module internal View =
         let mutable current = None
         let modes = ComboBox(ItemsSource = [| "依赖树"; "依赖图" |], SelectedIndex = 0)
         AutomationProperties.SetName(modes, "依赖视图")
-        let mutable views: Lazy<Control> array = [||]
+        let mutable views: Lazy<Control * (unit -> unit)> array = [||]
+        let mutable key: (string * string * bool) option = None
+        let chainBox = TextBox(IsReadOnly = true, TextWrapping = Avalonia.Media.TextWrapping.Wrap)
+        AutomationProperties.SetName(chainBox, "引用链与命中路径")
+        let missing = ComboBox(MaxWidth = 320.)
+        AutomationProperties.SetName(missing, "未解析导入")
         let show () =
             if modes.SelectedIndex >= 0 && modes.SelectedIndex < views.Length then
-                content.Content <- views[modes.SelectedIndex].Value
+                let page, locate = views[modes.SelectedIndex].Value
+                content.Content <- page
+                locate()
         modes.SelectionChanged.Subscribe(fun _ -> show()) |> tabSubscriptions.Add
         let cancel () = pending |> Option.iter (fun source -> source.Cancel())
         let openFile path =
+            if current <> Some path then key <- None
             current <- Some path
             cancel()
             let source = new CancellationTokenSource()
             pending <- Some source
             resultSubscriptions.Clear()
             views <- [||]
-            content.Content <- TextBlock(Text = "正在分析依赖…")
+            missing.ItemsSource <- null
+            chainBox.Text <- ""
+            content.Content <- TextBlock(Text = $"正在分析依赖 · {path}")
             let search = folders |> Seq.toArray
             task {
                 try
                     try
                         let! result = Task.Run(fun () -> DependencyAnalysis.Read(path, search, source.Token))
                         if not source.IsCancellationRequested then
-                            views <- [| lazy (tree resultSubscriptions result :> Control)
-                                        lazy (Graph.create resultSubscriptions result :> Control) |]
+                            let chains = Collections.Generic.Dictionary<DependencyEdge, DependencyEdge list>(HashIdentity.Reference)
+                            let paths = Collections.Generic.Dictionary<string * string * bool, DependencyEdge>()
+                            let parents = Collections.Generic.Dictionary<DependencyEdge, string>(HashIdentity.Reference)
+                            let seen = Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                            let queue = Collections.Generic.Queue<DependencyModule * DependencyEdge list>()
+                            queue.Enqueue(result.Root, [])
+                            seen.Add(result.Root.Path) |> ignore
+                            while queue.Count > 0 do
+                                let parent, route = queue.Dequeue()
+                                for edge in parent.Imports do
+                                    let next = edge :: route
+                                    chains[edge] <- next
+                                    parents[edge] <- parent.Path
+                                    paths[(parent.Path, edge.Name, edge.Delayed)] <- edge
+                                    if not (isNull edge.Target) && seen.Add(edge.Target.Path) then queue.Enqueue(edge.Target, next)
+                            let mutable selected = key |> Option.bind (fun k -> match paths.TryGetValue k with true, e -> Some e | _ -> None)
+                            let pick value =
+                                selected <- value
+                                key <- value |> Option.map (fun e -> parents[e], e.Name, e.Delayed)
+                                chainBox.Text <- match value with
+                                                 | None -> result.Root.Path
+                                                 | Some e ->
+                                                     let names = List.rev chains[e] |> List.map _.Name
+                                                     String.concat " → " (IO.Path.GetFileName(path) :: names) + Environment.NewLine + Labels.edgeLabel e
+                            let absent = chains.Keys |> Seq.filter (fun e -> isNull e.Target) |> Seq.toArray
+                            missing.ItemsSource <- absent |> Array.map (fun e -> $"{IO.Path.GetFileName parents[e]} → {e.Name}")
+                            missing.SelectionChanged.Subscribe(fun _ ->
+                                if missing.SelectedIndex >= 0 then pick (Some absent[missing.SelectedIndex]); show()) |> resultSubscriptions.Add
+                            views <- [| lazy (let page, locate = tree resultSubscriptions result pick
+                                              page, fun () -> locate (selected |> Option.map (fun e -> List.rev chains[e]) |> Option.defaultValue []))
+                                        lazy (let page, locate = Graph.create resultSubscriptions result pick
+                                              page, fun () -> locate selected) |]
+                            pick selected
                             show()
                     with e ->
                         if not source.IsCancellationRequested then content.Content <- TextBlock(Text = e.Message)
@@ -139,6 +194,9 @@ module internal View =
         header.Children.Add controls
         header.Children.Add feedback
         header.Children.Add modes
+        header.Children.Add(TextBlock(Text = "未解析导入 · 选择后定位"))
+        header.Children.Add missing
+        header.Children.Add chainBox
         let close () =
             let release () =
                 cancel()

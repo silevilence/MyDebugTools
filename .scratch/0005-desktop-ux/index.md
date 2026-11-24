@@ -14,7 +14,7 @@ Status: ready-for-agent
 | 调试目标、上下文带入与运行时提示 | 已实施，待统一验收 | B、H |
 | 插件管理、扩展、重载与采集确认 | 已实施，待统一验收 | E、G、H |
 | DLL 导出、签名、调用结果与代码生成 | 已实施，待统一验收 | C、H |
-| DLL 依赖树、图、搜索顺序与未解析原因 | 待开始 | D、H |
+| DLL 依赖树、图、搜索顺序与未解析原因 | 已实施，待统一验收 | D、H |
 | API 监控准备、运行与会话回看 | 待开始 | E、H |
 | HTTP 请求、正文、接口定义、响应与请求日志 | 待开始 | F、H |
 | 诊断复制、脱敏和剪贴板失败回退 | 待开始 | H |
@@ -45,7 +45,7 @@ Status: ready-for-agent
 | [0005-10 查找导出并保住签名草稿](issues/10-export-signature-drafts.md) | 无 | 已实施，待统一验收 |
 | [0005-11 按签名调用并核对结果](issues/11-call-and-read-results.md) | 10 | 已实施，待统一验收 |
 | [0005-12 按可见预览复制和导出代码](issues/12-copy-binding-preview.md) | 无 | 已实施，待统一验收 |
-| [0005-13 从缺失依赖追到引用方](issues/13-trace-missing-dependency.md) | 无 | 待开始 |
+| [0005-13 从缺失依赖追到引用方](issues/13-trace-missing-dependency.md) | 无 | 已实施，待统一验收 |
 | [0005-14 选好函数和目标再开始监控](issues/14-prepare-api-monitor.md) | 无 | 待开始 |
 | [0005-15 持续阅读、筛选和回看采集记录](issues/15-read-monitor-session.md) | 无 | 待开始 |
 | [0005-16 编辑并发送一次 HTTP 请求](issues/16-compose-http-request.md) | 无 | 待开始 |
