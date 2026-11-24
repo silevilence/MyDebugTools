@@ -96,6 +96,11 @@ module private View =
         let state = TextBlock(TextWrapping = TextWrapping.Wrap)
         AutomationProperties.SetAutomationId(state, "capture-status")
         AutomationProperties.SetAutomationId(detail, "call-detail")
+        let functionFilter = input "筛选记录函数"
+        let threadFilter = input "筛选线程 ID"
+        let matches = TextBlock()
+        let displayed = Collections.ObjectModel.ObservableCollection<CapturedCall>()
+        calls.ItemsSource <- displayed
         let mutable lastView = None
         let showDetail () =
             detail.Text <- match calls.SelectedItem with :? CapturedCall as c -> c.Details | _ -> ""
@@ -103,14 +108,26 @@ module private View =
             match history.SelectedItem with
             | :? CaptureSession as s when lastView <> Some (s, s.Revision) ->
                 lastView <- Some (s, s.Revision)
-                let old = calls.SelectedIndex
+                let old = match calls.SelectedItem with :? CapturedCall as c -> Some c.Id | _ -> None
                 let rows = s.Records()
-                calls.ItemsSource <- rows
-                calls.SelectedIndex <- if old < 0 && rows.Length > 0 then 0 else old
+                let filtered = rows |> Array.filter (fun c ->
+                    c.Function.Contains(string functionFilter.Text, StringComparison.OrdinalIgnoreCase) &&
+                    (String.IsNullOrWhiteSpace threadFilter.Text || string c.Thread = threadFilter.Text))
+                matches.Text <- $"匹配 {filtered.Length} / 共 {rows.Length} 条记录"
+                for i in 0 .. filtered.Length - 1 do
+                    if i >= displayed.Count then displayed.Add(filtered[i])
+                    elif displayed[i] <> filtered[i] then displayed[i] <- filtered[i]
+                while displayed.Count > filtered.Length do displayed.RemoveAt(displayed.Count - 1)
+                let index = old |> Option.bind (fun id -> filtered |> Array.tryFindIndex (fun c -> c.Id = id))
+                calls.SelectedIndex <- defaultArg index (if filtered.Length = 0 then -1 else 0)
                 showDetail()
                 let time = if s.Effective.HasValue then s.Effective.Value.ToString("HH:mm:ss.fffffff") else "等待"
                 state.Text <- $"{s.Target} · PID {s.Pid} · {s.Architecture} · 生效 {time} · {s.Status} · {rows.Length} 次调用 · 丢失 {s.Lost}"
             | _ -> ()
+        let filterChanged () = lastView <- None; refresh()
+        functionFilter.TextChanged.Add(fun _ -> filterChanged())
+        threadFilter.TextChanged.Add(fun _ -> filterChanged())
+        let clearRecords = button "清除记录筛选" (fun () -> functionFilter.Text <- ""; threadFilter.Text <- "")
         calls.SelectionChanged.Add(fun _ -> showDetail())
         history.SelectionChanged.Add(fun _ -> refresh())
         let track beginCapture =
@@ -166,7 +183,7 @@ module private View =
         let controls: Control list =
             [ TextBlock(Text = "API 监控", FontSize = 24.); sourceName; sdk; dll; load; query; clear; results; details; add
               count; chosen; remove; TextBlock(Text = "选择目标"); mode; exe; args; start; pid; attach; message
-              TextBlock(Text = "采集会话"); history; stop; state; calls; detail ]
+              TextBlock(Text = "采集会话"); history; stop; state; functionFilter; threadFilter; clearRecords; matches; calls; detail ]
         controls |> List.iter panel.Children.Add
         ScrollViewer(Content = panel) :> Control
 
