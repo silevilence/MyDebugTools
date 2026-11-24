@@ -20,6 +20,7 @@ type Host() =
     let plugins = ResizeArray<Plugin>()
     let active = Dictionary<string, PluginHandle>()
     let pages = Dictionary<string, Page>()
+    let relations = Dictionary<string, string list * (string * string) list>()
     let dllTabs = ResizeArray<string * DllTab>()
     let tabPoints = Dictionary<string * string, DllTabPoint>()
     let tabsChanged = Event<unit>()
@@ -68,6 +69,7 @@ type Host() =
                 | _ -> ()
     ]
 
+    member _.Relations id = match relations.TryGetValue id with true, value -> Some value | _ -> None
     member _.Plugins = plugins |> Seq.toList
     member _.Pages = pages.Values |> Seq.toList
     member _.Enabled id = active.ContainsKey id
@@ -137,6 +139,10 @@ type Host() =
                                         extensions.RemoveAll(fun (owner, _) -> owner = id) |> ignore
                                         for page in additions do pages.Remove page.Id |> ignore }
                 active.Add(id, handle)
+                relations[id] <-
+                    [for page in additions -> page.Id],
+                    [for tab in tabs -> tab.PageId, tab.Title + "（页签）"
+                     for action in actions -> action.PageId, action.Title + "（菜单）"]
             with _ ->
                 release()
                 reraise()

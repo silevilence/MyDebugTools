@@ -10,7 +10,10 @@ open System.Threading.Tasks
 open MyDebugTools.Contracts
 
 [<CLIMutable>]
-type PluginManifest = { Id: string; Title: string; Assembly: string; EntryType: string; Version: string }
+type PluginExtensionInfo = { PageId: string; Title: string }
+
+[<CLIMutable>]
+type PluginManifest = { Id: string; Title: string; Assembly: string; EntryType: string; Version: string; Pages: string array; Extensions: PluginExtensionInfo array }
 
 type private PluginContext(entry: string) =
     inherit AssemblyLoadContext(Path.GetFileNameWithoutExtension entry, true)
@@ -42,7 +45,7 @@ type private Retired = { Id: string; Context: WeakReference; Snapshot: Directory
 type LocalPlugins(host: Host, settingsFile: string) =
     let locations = Dictionary<string, string>()
     let bundled = HashSet<string>()
-    let versions = Dictionary<string, string>()
+    let manifests = Dictionary<string, PluginManifest>()
     let retired = ResizeArray<Retired>()
     let mutable collectedSinceCheck = 0
     let options = EnumerationOptions(RecurseSubdirectories = true, IgnoreInaccessible = false,
@@ -109,7 +112,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
             Create = fun () -> { new IDesktopPlugin with member _.Activate reg = activate (copyOutput folder info.Id) reg }
         }
         locations.Add(info.Id, folder)
-        versions[info.Id] <- info.Version
+        manifests[info.Id] <- info
 
     let savedPaths () =
         if File.Exists settingsFile then JsonSerializer.Deserialize<string array>(File.ReadAllText settingsFile)
@@ -125,8 +128,8 @@ type LocalPlugins(host: Host, settingsFile: string) =
         else "随附普通"
 
     member _.Version(id) =
-        match versions.TryGetValue id with
-        | true, v when not (String.IsNullOrWhiteSpace v) -> v
+        match manifests.TryGetValue id with
+        | true, info when not (String.IsNullOrWhiteSpace info.Version) -> info.Version
         | _ -> "未知"
 
     member _.Restore() = [
@@ -135,6 +138,14 @@ type LocalPlugins(host: Host, settingsFile: string) =
             with e -> yield $"{path}：{e.Message}"
     ]
 
+    member _.Relations id =
+        match host.Relations id, manifests.TryGetValue id with
+        | Some actual, _ -> Some actual
+        | _, (true, m) when not (isNull m.Pages && isNull m.Extensions) ->
+            Some ((Option.ofObj m.Pages |> Option.defaultValue [||] |> Array.toList),
+                  [for e in Option.ofObj m.Extensions |> Option.defaultValue [||] do
+                      if not (isNull (box e)) && not (String.IsNullOrWhiteSpace e.PageId) then yield e.PageId, e.Title])
+        | _ -> None
     member _.TitleAt(path) = (manifest path).Title
 
     member _.AddDirectory(path) =
@@ -166,7 +177,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
                 host.Enable(id, fun registry ->
                     transferred <- true
                     activate (snapshot, info) registry)
-                versions[id] <- info.Version
+                manifests[id] <- info
             finally
                 if not transferred then snapshot.Delete(true)
         | _ ->

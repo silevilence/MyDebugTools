@@ -1,1 +1,13 @@
-{"Id":"dll.dependencies","Title":"DLL 依赖","Assembly":"DllDependencies.dll","EntryType":"MyDebugTools.DllDependencies.Plugin"}
+{
+  "Id": "dll.dependencies",
+  "Title": "DLL 依赖",
+  "Assembly": "DllDependencies.dll",
+  "EntryType": "MyDebugTools.DllDependencies.Plugin",
+  "Pages": [],
+  "Extensions": [
+    {
+      "PageId": "dll.debugger",
+      "Title": "依赖（页签）"
+    }
+  ]
+}

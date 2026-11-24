@@ -136,6 +136,7 @@ type MainWindow() as window =
     let feedback = TextBlock(TextWrapping = Media.TextWrapping.Wrap)
     let managerDiagnostic = DiagnosticPanel()
     let filter = TextBox(PlaceholderText = "按插件名称查找")
+    let flat = CheckBox(Content = "全部插件（平表）")
     let rows = StackPanel(Spacing = 4.)
     let mutable closeAfterChange = false
     let mutable current = "core.home"
@@ -306,6 +307,7 @@ type MainWindow() as window =
         manager.Children.Add(Expander(Header = "卸载诊断", Content = checks))
         manager.Children.Add(TextBlock(Text = "查找插件"))
         manager.Children.Add filter
+        manager.Children.Add flat
         manager.Children.Add rows
         renderRows()
         navigate (if pages |> List.exists (fun p -> p.Id = current) then current else "core.manager")
@@ -323,8 +325,25 @@ type MainWindow() as window =
         titles |> List.iteri (fun i s -> field heading i (TextBlock(Text = s)))
         rows.Children.Add heading
         let query = string filter.Text
-        for plugin in host.Plugins do
-            if plugin.Title.Contains(query, StringComparison.OrdinalIgnoreCase) || plugin.Id.Contains(query, StringComparison.OrdinalIgnoreCase) then
+        let plugins = host.Plugins
+        let relations (p: Plugin) =
+            catalog.Relations p.Id |> Option.orElseWith (fun () ->
+                match p.Id with
+                | "sample.workbench" | "dll.debugger" -> Some ([p.Id], [])
+                | "sample.actions" -> Some ([], ["sample.workbench", "选中项与摘要（菜单）"])
+                | _ -> None)
+        let matches (p: Plugin) =
+            p.Title.Contains(query, StringComparison.OrdinalIgnoreCase) || p.Id.Contains(query, StringComparison.OrdinalIgnoreCase)
+        rows.Children.Add(TextBlock(Text = $"共 {plugins.Length} 个插件"))
+        for plugin in plugins do
+            let info = relations plugin
+            let pages, targets = defaultArg info ([], [])
+            let children = [
+                for page in pages do
+                    for child in plugins do
+                        for target, title in relations child |> Option.map snd |> Option.defaultValue [] do
+                            if target = page then yield page, child, title ]
+            if matches plugin || (flat.IsChecked <> Nullable true && children |> List.exists (fun (_, c, _) -> matches c)) then
                 let row = grid()
                 let enabled = host.Enabled plugin.Id
                 let source = if plugin.Core then "随附核心" else catalog.Source plugin.Id
@@ -334,7 +353,16 @@ type MainWindow() as window =
                 let version = catalog.Version plugin.Id
                 let details = TextBox(IsReadOnly = true, TextWrapping = Media.TextWrapping.Wrap,
                                       Text = $"{plugin.Id} · {source} · 版本 {version}\n{path}")
-                field row 0 (Expander(Header = name, Content = details))
+                let detailPanel = StackPanel(Spacing = 4.)
+                detailPanel.Children.Add details
+                if info.IsNone then detailPanel.Children.Add(TextBlock(Text = "关系待识别"))
+                for page in pages do detailPanel.Children.Add(TextBlock(Text = $"提供界面 · {page}"))
+                for target, title in targets do detailPanel.Children.Add(TextBlock(Text = $"{title} → {target}", TextWrapping = Media.TextWrapping.Wrap))
+                if flat.IsChecked <> Nullable true then
+                    for page, child, title in children do
+                        addAction detailPanel $"{page} → {child.Title} · {title}" (fun () -> flat.IsChecked <- Nullable true; filter.Text <- child.Id)
+                let expanded = query <> "" && not (matches plugin)
+                field row 0 (Expander(Header = name, Content = detailPanel, IsExpanded = expanded))
                 if wide then
                     field row 1 (TextBlock(Text = source))
                     field row 2 (TextBlock(Text = version))
@@ -397,6 +425,7 @@ type MainWindow() as window =
             (host :> IDisposable).Dispose()
             catalog.CheckUnloads() |> ignore)
         AutomationProperties.SetName(filter, "查找插件")
+        flat.IsCheckedChanged.Add(fun _ -> renderRows())
         filter.TextChanged.Add(fun _ -> renderRows())
         window.SizeChanged.Add(fun e ->
             if (e.PreviousSize.Width >= 760.) <> (e.NewSize.Width >= 760.) then renderRows())
