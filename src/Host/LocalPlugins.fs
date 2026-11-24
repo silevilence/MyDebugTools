@@ -35,7 +35,7 @@ type private PluginContext(entry: string) =
         | path -> this.LoadUnmanagedDllFromPath path
 
 /// A running load context and a rollback slot can share the same immutable files.
-type private Snapshot(folder: DirectoryInfo, manifest: PluginManifest) as this =
+type private Snapshot(folder: DirectoryInfo, manifest: PluginManifest, remove: unit -> unit) as this =
     let mutable owners = 1
     member _.Folder = folder
     member _.Manifest = manifest
@@ -43,12 +43,13 @@ type private Snapshot(folder: DirectoryInfo, manifest: PluginManifest) as this =
         owners <- owners + 1
         this
     member _.Release() =
-        if owners = 1 then folder.Delete(true)
+        if owners = 1 then remove()
         owners <- owners - 1
 
 type private Retired = { Id: string; Context: WeakReference; Snapshot: Snapshot }
 type private Temporary = {
     Directory: string; Manifest: PluginManifest; HasFormal: bool; FormalEnabled: bool; FormalImage: Snapshot option
+    FormalRelations: (string list * (string * string) list) option
 }
 
 type PluginStatus = {
@@ -102,17 +103,52 @@ type LocalPlugins(host: Host, settingsFile: string) =
     let sweep () =
         for item in retired.ToArray() do
             if not item.Context.IsAlive then
-                // Snapshot is exclusively created by CreateTempSubdirectory below.
+                // Release the files only after the collectible context is gone.
                 try
                     item.Snapshot.Release()
                     retired.Remove item |> ignore
                     collectedSinceCheck <- collectedSinceCheck + 1
                 with :? IOException -> ()
 
-    let copyOutput folder id =
+    let temporaryRoot = Path.Combine(Path.GetDirectoryName settingsFile, "developer-snapshots")
+
+    // A separate lease survives a crash. Other running hosts keep their leases open.
+    do
+        if Directory.Exists temporaryRoot then
+            for file in Directory.EnumerateFiles(temporaryRoot, "*.lease") do
+                let name = Path.GetFileNameWithoutExtension file
+                if Guid.TryParseExact(name, "N") |> fst then
+                    try
+                        use lease = File.Open(file, FileMode.Open, FileAccess.ReadWrite, FileShare.Delete)
+                        let folder = Path.Combine(temporaryRoot, name)
+                        if Directory.Exists folder then Directory.Delete(folder, true)
+                        File.Delete file
+                    with :? IOException -> ()
+
+    let allocateTemporary () =
+        Directory.CreateDirectory temporaryRoot |> ignore
+        let path = Path.Combine(temporaryRoot, Guid.NewGuid().ToString("N"))
+        let leaseFile = path + ".lease"
+        let lease = File.Open(leaseFile, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.Delete)
+        try
+            let folder = Directory.CreateDirectory path
+            folder, fun () ->
+                folder.Delete(true)
+                File.Delete leaseFile
+                lease.Dispose()
+        with _ ->
+            lease.Dispose()
+            File.Delete leaseFile
+            reraise()
+
+    let allocateNormal () =
+        let folder = Directory.CreateTempSubdirectory("MyDebugTools-plugin-")
+        folder, fun () -> folder.Delete(true)
+
+    let copyOutput allocate folder id =
         let info = manifest folder
         if info.Id <> id then invalidOp "目录中的插件 Id 已改变"
-        let snapshot = Directory.CreateTempSubdirectory("MyDebugTools-plugin-")
+        let (snapshot: DirectoryInfo), remove = allocate()
         try
             let relativeSnapshot = Path.GetRelativePath(folder, snapshot.FullName)
             if not (Path.IsPathRooted relativeSnapshot || relativeSnapshot.StartsWith(".." + string Path.DirectorySeparatorChar, StringComparison.Ordinal)) then
@@ -125,9 +161,9 @@ type LocalPlugins(host: Host, settingsFile: string) =
                 source.CopyTo destination
             let copied = manifest snapshot.FullName
             if copied.Id <> id then invalidOp "复制期间插件 Id 已改变"
-            Snapshot(snapshot, copied)
+            Snapshot(snapshot, copied, remove)
         with _ ->
-            snapshot.Delete(true)
+            remove()
             reraise()
 
     let activate (snapshot: Snapshot) (registry: Registration) =
@@ -154,7 +190,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
     let attach folder (info: PluginManifest) =
         host.Add {
             Id = info.Id; Title = info.Title; Core = false
-            Create = fun () -> { new IDesktopPlugin with member _.Activate reg = activate (copyOutput folder info.Id) reg }
+            Create = fun () -> { new IDesktopPlugin with member _.Activate reg = activate (copyOutput allocateNormal folder info.Id) reg }
         }
         locations.Add(info.Id, folder)
         manifests[info.Id] <- info
@@ -227,14 +263,23 @@ type LocalPlugins(host: Host, settingsFile: string) =
         let folder = DirectoryInfo(directory)
         if folder.FullName.StartsWith(@"\\") || DriveInfo(folder.Root.FullName).DriveType = DriveType.Network then
             invalidArg "directory" "请指定本机编译目录"
-        let id = (manifest folder.FullName).Id
+        let id =
+            try (manifest folder.FullName).Id
+            with e ->
+                let previous =
+                    temporary |> Seq.tryPick (fun pair ->
+                        if String.Equals(pair.Value.Directory, folder.FullName, StringComparison.OrdinalIgnoreCase) then Some pair.Key else None)
+                let subject = defaultArg previous folder.FullName
+                let reason = $"{subject} · 读取 plugin.json 失败 · {e.Message}"
+                previous |> Option.iter (fun key -> temporaryErrors[key] <- reason)
+                raise (InvalidOperationException(reason, e))
         let formal = host.Plugins |> List.tryFind (fun p -> p.Id = id)
         if formal |> Option.exists _.Core then invalidOp $"{id} · 核心插件固定加载"
         if packages.ContainsKey id && packages[id].PendingRemoval then invalidOp $"{id} · 正式版等待完成卸载"
         let previousEntry = match temporary.TryGetValue id with true, item -> Some item | _ -> None
         let mutable stage = "复制编译输出"
         try
-            let! candidate = Task.Run(fun () -> copyOutput folder.FullName id)
+            let! candidate = Task.Run(fun () -> copyOutput allocateTemporary folder.FullName id)
             try
                 stage <- "桌面确认"
                 let! approved = approve id folder.FullName
@@ -247,7 +292,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
                         match previousEntry with
                         | Some old -> { old with Directory = folder.FullName; Manifest = candidate.Manifest }
                         | None -> { Directory = folder.FullName; Manifest = candidate.Manifest; HasFormal = formal.IsSome
-                                    FormalEnabled = wasEnabled; FormalImage = previous }
+                                    FormalEnabled = wasEnabled; FormalImage = previous; FormalRelations = host.Relations id }
                     // On first takeover, transfer the retained formal snapshot to the overlay.
                     let mutable keepPrevious = false
                     try
@@ -289,7 +334,10 @@ type LocalPlugins(host: Host, settingsFile: string) =
         match temporary.TryGetValue id with
         | false, _ -> return invalidOp $"{id} · 未安装临时插件"
         | true, item ->
-            let! proceed = allowStop id
+            let! proceed = task {
+                try return! allowStop id
+                with e -> return raise (InvalidOperationException($"{id} · 结束采集失败 · {e.Message}", e))
+            }
             if not proceed then return $"{id} · 已取消，当前版本继续运行"
             else
                 let previous = activeImage id
@@ -298,6 +346,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
                     try
                         refresh()
                         if item.FormalEnabled then enableImage id item.FormalImage
+                        elif item.HasFormal then host.RestoreRelations(id, item.FormalRelations)
                         if not item.HasFormal then host.Remove id
                         temporary.Remove id |> ignore
                         temporaryErrors.Remove id |> ignore
@@ -474,7 +523,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
         if packages.ContainsKey id && packages[id].PendingRemoval then invalidOp "请先完成卸载"
         match locations.TryGetValue id with
         | true, folder ->
-            let! snapshot = Task.Run(fun () -> copyOutput folder id)
+            let! snapshot = Task.Run(fun () -> copyOutput allocateNormal folder id)
             let mutable transferred = false
             try
                 detach()

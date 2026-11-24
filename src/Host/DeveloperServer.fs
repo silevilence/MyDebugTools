@@ -132,7 +132,7 @@ type DeveloperServer(settingsPath: string, version: string, extraTools: McpServe
     member _.Enabled = settings.Enabled
     member _.Error = failure
     member _.Configuration =
-        JsonSerializer.Serialize({| mcpServers = {| MyDebugTools = {| url = endpoint(); headers = {| Authorization = "Bearer " + settings.Token |} |} |} |})
+        JsonSerializer.Serialize({| mcpServers = {| MyDebugTools = {| ``type`` = "http"; url = endpoint(); headers = {| Authorization = "Bearer " + settings.Token |} |} |} |})
 
     member _.SetEnabled enabled =
         let port =

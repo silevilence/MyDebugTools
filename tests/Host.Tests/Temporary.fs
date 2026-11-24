@@ -11,6 +11,22 @@ open ModelContextProtocol.Client
 open ModelContextProtocol.Protocol
 open Xunit
 
+/// Desktop acceptance fixture that collects elapsed ticks until Stop completes.
+type TickCapture() =
+    interface IDesktopPlugin with
+        member _.Activate registry =
+            let mutable ticks = 0
+            let timer = new System.Threading.Timer((fun _ -> System.Threading.Interlocked.Increment(&ticks) |> ignore), null, 0, 50)
+            let mutable running = true
+            registry.Monitor {
+                Target = fun () -> if running then Some $"采样计时器 · {ticks}" else None
+                Stop = fun () -> task {
+                    do! timer.DisposeAsync()
+                    running <- false
+                }
+            }
+            registry.Own timer
+
 /// Real collectible plugin that fails after declaring UI and owning live resources.
 type PartialActivation() =
     interface IDesktopPlugin with
@@ -140,7 +156,22 @@ let ``two rebuilds rollback failures and queued uninstall release old versions``
             let! error, message = install()
             Assert.False(error, message)
             check revision
+        let lockedBuild () = task {
+            use entry = File.Open(Path.Combine(output, "ThirdPartyTools.dll"), FileMode.Open, FileAccess.Write, FileShare.None)
+            let! failed, reason = install()
+            Assert.True(failed, reason)
+            Assert.Contains("复制编译输出", reason)
+        }
+        do! lockedBuild()
+        check "1"
         let original = File.ReadAllText(Path.Combine(output, "plugin.json"))
+        File.WriteAllText(Path.Combine(output, "plugin.json"), "{")
+        let! malformed, detail = install()
+        Assert.True(malformed, detail)
+        Assert.Contains(id, detail)
+        Assert.Contains("读取 plugin.json", detail)
+        check "1"
+        File.WriteAllText(Path.Combine(output, "plugin.json"), original)
         let testAssembly = typeof<PartialActivation>.Assembly
         File.Copy(testAssembly.Location, Path.Combine(output, "fixture.dll"))
         let failures = [
@@ -162,6 +193,8 @@ let ``two rebuilds rollback failures and queued uninstall release old versions``
         pause <- true
         let replacing = install()
         do! waiting.Task.WaitAsync(TimeSpan.FromSeconds 10.)
+        // The approved bytes must remain usable even if the developer overwrites the output meanwhile.
+        File.WriteAllBytes(Path.Combine(output, "ThirdPartyTools.dll"), [|0uy|])
         let removing = invoke client "uninstall_temporary" ["id", box id]
         approved.SetResult(true)
         let! replaced, detail = replacing

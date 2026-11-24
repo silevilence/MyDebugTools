@@ -1,7 +1,7 @@
 # Run from the repository root with PowerShell 7 after publishing src/Desktop.
 [CmdletBinding()]
 param([string]$Publish = 'artifacts/publish', [string]$DllFixtures = 'tests/DllDebugger.Tests/bin/Release/net10.0',
-      [string]$EchoPortFile = 'C:/Evidence/echo-port', [switch]$NavigationOnly, [switch]$PointerOnly, [switch]$PackagesOnly, [switch]$ReportsOnly, [switch]$AppearanceOnly, [switch]$FloatingOnly, [switch]$UxOnly, [switch]$DllOnly, [switch]$MonitorOnly, [string]$PreviousMonitorPlugin, [switch]$DependenciesOnly, [switch]$WebApiOnly)
+      [string]$EchoPortFile = 'C:/Evidence/echo-port', [switch]$DeveloperOnly, [switch]$NavigationOnly, [switch]$PointerOnly, [switch]$PackagesOnly, [switch]$ReportsOnly, [switch]$AppearanceOnly, [switch]$FloatingOnly, [switch]$UxOnly, [switch]$DllOnly, [switch]$MonitorOnly, [string]$PreviousMonitorPlugin, [switch]$DependenciesOnly, [switch]$WebApiOnly)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
@@ -276,11 +276,12 @@ try {
         Copy-Item -LiteralPath $PreviousMonitorPlugin -Destination $liveMonitor
         $exe = Join-Path $desktopCopy 'MyDebugTools.exe'
     }
-    if (!$NavigationOnly -and !$PointerOnly -and !$PackagesOnly -and !$ReportsOnly -and !$AppearanceOnly -and !$FloatingOnly -and !$UxOnly -and !$DllOnly -and !$MonitorOnly -and !$DependenciesOnly -and !$WebApiOnly) {
+    if (!$DeveloperOnly -and !$NavigationOnly -and !$PointerOnly -and !$PackagesOnly -and !$ReportsOnly -and !$AppearanceOnly -and !$FloatingOnly -and !$UxOnly -and !$DllOnly -and !$MonitorOnly -and !$DependenciesOnly -and !$WebApiOnly) {
         Build-Sample ThirdPartyTools $thirdPartyDir '-p:SampleRevision=1'
         Build-Sample Workbench $providerDir '-p:SummaryVersion=1'
     }
     Start-Desktop
+    if ($DeveloperOnly) { . "$PSScriptRoot/DesktopDeveloper.ps1"; Check-DeveloperMcp; return }
     if ($NavigationOnly) {
         Open-Manager
         foreach ($round in 1,2,3) {

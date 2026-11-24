@@ -90,6 +90,10 @@ type Host() =
     ]
 
     member _.Relations id = match relations.TryGetValue id with true, value -> Some value | _ -> None
+    member internal _.RestoreRelations(id, previous) =
+        match previous with
+        | Some value -> relations[id] <- value
+        | None -> relations.Remove id |> ignore
     member _.Plugins = plugins |> Seq.toList
     member _.Pages = pages.Values |> Seq.toList
     member _.Enabled id = active.ContainsKey id
