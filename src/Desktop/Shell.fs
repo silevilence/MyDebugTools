@@ -131,7 +131,7 @@ type MainWindow() as window =
         handlers.Clear()
         menu.Items.Clear()
     let actionResult = TextBlock(Margin = Thickness(24., 0., 24., 8.))
-    let workspace = Workspace()
+    let workspace = Workspace(window)
     let pageArea = workspace.Control
     let views = ShellMenuItem("视图")
     let manager = StackPanel(Spacing = 12.)
@@ -276,6 +276,9 @@ type MainWindow() as window =
             let item = ShellMenuItem(title)
             navigationHandlers.Add(item.Click.Subscribe(fun _ -> workspace.Move(current, action)))
             views.Items.Add item |> ignore
+        let reset = ShellMenuItem("恢复默认布局")
+        navigationHandlers.Add(reset.Click.Subscribe(fun _ -> workspace.Reset()))
+        views.Items.Add reset |> ignore
         menu.Items.Add views |> ignore
         home.Children.Clear()
         home.Children.Add(TextBlock(Text = "开始调试", FontSize = 24.))
@@ -520,7 +523,10 @@ type MainWindow() as window =
         window.Closing.Add(fun e ->
             if not manager.IsEnabled then
                 e.Cancel <- true
-                closeAfterChange <- true)
+                closeAfterChange <- true
+            elif not e.Cancel then
+                try workspace.Save([|for p in host.Plugins do if not p.Core && host.Enabled p.Id then yield p.Id|], current)
+                with ex -> feedback.Text <- $"布局未能保存 · {ex.Message}")
         window.Closed.Add(fun _ ->
             for id in cache.Keys do workspace.Remove id
             cache.Clear()
@@ -533,4 +539,15 @@ type MainWindow() as window =
         filter.TextChanged.Add(fun _ -> renderRows())
         window.SizeChanged.Add(fun e ->
             if (e.PreviousSize.Width >= 760.) <> (e.NewSize.Width >= 760.) then renderRows())
+        try
+            let enable id =
+                if host.Plugins |> List.exists (fun p -> p.Id = id) then
+                    try host.Enable id with e -> feedback.Text <- e.Message
+            let lookup id =
+                host.Pages |> List.tryFind (fun p -> p.Id = id) |> Option.map (fun page ->
+                    let control = page.Create()
+                    cache[id] <- control
+                    control)
+            current <- workspace.Restore(enable, lookup) |> Option.defaultValue current
+        with e -> feedback.Text <- $"布局无法恢复，已使用默认工作区。{e.Message}"
         refresh()
