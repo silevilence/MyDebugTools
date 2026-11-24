@@ -34,7 +34,22 @@ type private PluginContext(entry: string) =
         | null -> 0n
         | path -> this.LoadUnmanagedDllFromPath path
 
-type private Retired = { Id: string; Context: WeakReference; Snapshot: DirectoryInfo }
+/// A running load context and a rollback slot can share the same immutable files.
+type private Snapshot(folder: DirectoryInfo, manifest: PluginManifest) as this =
+    let mutable owners = 1
+    member _.Folder = folder
+    member _.Manifest = manifest
+    member _.Retain() =
+        owners <- owners + 1
+        this
+    member _.Release() =
+        if owners = 1 then folder.Delete(true)
+        owners <- owners - 1
+
+type private Retired = { Id: string; Context: WeakReference; Snapshot: Snapshot }
+type private Temporary = {
+    Directory: string; Manifest: PluginManifest; HasFormal: bool; FormalEnabled: bool; FormalImage: Snapshot option
+}
 
 type PluginStatus = {
     Id: string; Source: string; Origin: string; Version: string
@@ -56,6 +71,9 @@ type LocalPlugins(host: Host, settingsFile: string) =
     let bundled = HashSet<string>()
     let manifests = Dictionary<string, PluginManifest>()
     let retired = ResizeArray<Retired>()
+    let images = Dictionary<string, Snapshot>()
+    let temporary = Dictionary<string, Temporary>()
+    let temporaryErrors = Dictionary<string, string>()
     let mutable collectedSinceCheck = 0
     let options = EnumerationOptions(RecurseSubdirectories = true, IgnoreInaccessible = false,
                                      AttributesToSkip = FileAttributes.ReparsePoint)
@@ -86,7 +104,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
             if not item.Context.IsAlive then
                 // Snapshot is exclusively created by CreateTempSubdirectory below.
                 try
-                    item.Snapshot.Delete(true)
+                    item.Snapshot.Release()
                     retired.Remove item |> ignore
                     collectedSinceCheck <- collectedSinceCheck + 1
                 with :? IOException -> ()
@@ -105,28 +123,33 @@ type LocalPlugins(host: Host, settingsFile: string) =
                 use source = File.OpenRead file
                 use destination = File.Create target
                 source.CopyTo destination
-            snapshot, info
+            let copied = manifest snapshot.FullName
+            if copied.Id <> id then invalidOp "复制期间插件 Id 已改变"
+            Snapshot(snapshot, copied)
         with _ ->
             snapshot.Delete(true)
             reraise()
 
-    let activate (snapshot: DirectoryInfo, info: PluginManifest) (registry: Registration) =
+    let activate (snapshot: Snapshot) (registry: Registration) =
+        let info = snapshot.Manifest
         sweep()
         let mutable context: PluginContext option = None
         let retire () =
+            images.Remove info.Id |> ignore
             match context with
             | Some alc ->
                 retired.Add { Id = info.Id; Context = WeakReference(alc, true); Snapshot = snapshot }
                 alc.Unload()
                 context <- None
-            | None -> snapshot.Delete(true)
+            | None -> snapshot.Release()
         registry.Own { new IDisposable with member _.Dispose() = retire() }
-        let entry = Path.Combine(snapshot.FullName, info.Assembly)
+        let entry = Path.Combine(snapshot.Folder.FullName, info.Assembly)
         let alc = PluginContext(entry)
         context <- Some alc
         let assembly = alc.ReadAssembly entry
         let plugin = Activator.CreateInstance(assembly.GetType(info.EntryType, true)) :?> IDesktopPlugin
         plugin.Activate registry
+        images[info.Id] <- snapshot
 
     let attach folder (info: PluginManifest) =
         host.Add {
@@ -135,6 +158,18 @@ type LocalPlugins(host: Host, settingsFile: string) =
         }
         locations.Add(info.Id, folder)
         manifests[info.Id] <- info
+
+    let activeImage id =
+        match images.TryGetValue id with true, image -> Some(image.Retain()) | _ -> None
+
+    let enableImage id image =
+        match image with
+        | Some (snapshot: Snapshot) -> host.Enable(id, fun registry -> activate (snapshot.Retain()) registry)
+        | None -> host.Enable id
+
+    let release image = image |> Option.iter (fun (s: Snapshot) -> s.Release())
+    let rejectTemporary id =
+        if temporary.ContainsKey id then invalidOp $"请先卸载临时插件 {id}"
 
     let savedPaths () =
         if File.Exists settingsFile then JsonSerializer.Deserialize<string array>(File.ReadAllText settingsFile)
@@ -163,8 +198,110 @@ type LocalPlugins(host: Host, settingsFile: string) =
                            Version = version; Enabled = enabled; State = if enabled then "active" else "disabled"
                            EffectiveVersion = if enabled then Some version else None
                            Reasons = host.Failure plugin.Id @ host.Mismatches plugin.Id }
-            yield! PluginStatus.effectiveSources (Some formal) None
+            let reasons = match temporaryErrors.TryGetValue plugin.Id with true, e -> [e] | _ -> []
+            match temporary.TryGetValue plugin.Id with
+            | true, item ->
+                let v = if String.IsNullOrWhiteSpace item.Manifest.Version then "未知" else item.Manifest.Version
+                let live = { formal with Source = "temporary"; Origin = item.Directory; Version = v
+                                         EffectiveVersion = if enabled then Some v else None
+                                         Reasons = formal.Reasons @ reasons }
+                let prior =
+                    if item.HasFormal then Some { formal with Enabled = item.FormalEnabled; Reasons = [] } else None
+                yield! PluginStatus.effectiveSources prior (Some live)
+            | _ -> yield { formal with Reasons = formal.Reasons @ reasons }
     ]
+
+    member _.IsTemporary id = temporary.ContainsKey id
+    member _.FormalEnabled = [|
+        for plugin in host.Plugins do
+            let enabled =
+                match temporary.TryGetValue plugin.Id with
+                | true, item -> item.FormalEnabled
+                | _ -> host.Enabled plugin.Id
+            if enabled && not plugin.Core then yield plugin.Id
+    |]
+
+    member _.InstallTemporary(directory: string, approve: string -> string -> Task<bool>,
+                              allowStop: string -> Task<bool>, refresh: unit -> unit) = task {
+        if not (Path.IsPathFullyQualified directory) then invalidArg "directory" "请指定本机绝对目录"
+        let folder = DirectoryInfo(directory)
+        if folder.FullName.StartsWith(@"\\") || DriveInfo(folder.Root.FullName).DriveType = DriveType.Network then
+            invalidArg "directory" "请指定本机编译目录"
+        let id = (manifest folder.FullName).Id
+        let formal = host.Plugins |> List.tryFind (fun p -> p.Id = id)
+        if formal |> Option.exists _.Core then invalidOp $"{id} · 核心插件固定加载"
+        if packages.ContainsKey id && packages[id].PendingRemoval then invalidOp $"{id} · 正式版等待完成卸载"
+        rejectTemporary id
+        let mutable stage = "复制编译输出"
+        try
+            let! candidate = Task.Run(fun () -> copyOutput folder.FullName id)
+            try
+                stage <- "桌面确认"
+                let! approved = approve id folder.FullName
+                let! proceed = if approved then allowStop id else Task.FromResult false
+                if not proceed then return $"{id} · 已取消，当前版本继续运行"
+                else
+                    let prior = { Directory = folder.FullName; Manifest = candidate.Manifest; HasFormal = formal.IsSome
+                                  FormalEnabled = host.Enabled id; FormalImage = activeImage id }
+                    try
+                        stage <- "撤下正式版"
+                        if prior.FormalEnabled then
+                            host.Disable id
+                            refresh()
+                        if formal.IsNone then
+                            host.Add { Id = id; Title = candidate.Manifest.Title; Core = false
+                                       Create = fun () -> invalidOp "请从开发客户端加载临时插件" }
+                        stage <- "激活临时版"
+                        enableImage id (Some candidate)
+                        temporary[id] <- prior
+                        refresh()
+                        temporaryErrors.Remove id |> ignore
+                        return $"{id} · 临时版已启用"
+                    with error ->
+                        temporary.Remove id |> ignore
+                        try
+                            if formal.IsNone && host.Plugins |> List.exists (fun p -> p.Id = id) then host.Remove id
+                            elif stage = "激活临时版" && host.Enabled id then host.Disable id
+                            refresh()
+                            if prior.FormalEnabled then enableImage id prior.FormalImage
+                            refresh()
+                        finally release prior.FormalImage
+                        return raise error
+            finally candidate.Release()
+        with e ->
+            let message = $"{id} · {stage}失败 · {e.GetBaseException().Message}"
+            temporaryErrors[id] <- message
+            return raise (InvalidOperationException(message, e))
+    }
+
+    member _.UninstallTemporary(id, allowStop: string -> Task<bool>, refresh: unit -> unit) = task {
+        match temporary.TryGetValue id with
+        | false, _ -> return invalidOp $"{id} · 未安装临时插件"
+        | true, item ->
+            let! proceed = allowStop id
+            if not proceed then return $"{id} · 已取消，当前版本继续运行"
+            else
+                let previous = activeImage id
+                try
+                    host.Disable id
+                    try
+                        refresh()
+                        if item.FormalEnabled then enableImage id item.FormalImage
+                        if not item.HasFormal then host.Remove id
+                        temporary.Remove id |> ignore
+                        temporaryErrors.Remove id |> ignore
+                    with error ->
+                        enableImage id previous
+                        raise (InvalidOperationException($"{id} · 恢复正式版失败 · {error.Message}", error))
+                    release item.FormalImage
+                    refresh()
+                    return $"{id} · 临时版已卸载"
+                finally release previous
+    }
+
+    member _.ReleaseTemporarySnapshots() =
+        for item in temporary.Values do release item.FormalImage
+        temporary.Clear()
 
     member _.Restore() = [
         for item in readPackages() do
@@ -188,6 +325,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
         match packages.TryGetValue id with true, item -> Some item | _ -> None
 
     member _.RemoveExternal(id, detached: unit -> unit) =
+        rejectTemporary id
         use guard = lockCatalog()
         if bundled.Contains id || not (locations.ContainsKey id) then invalidOp "只能移除外部插件"
         host.Disable id
@@ -220,6 +358,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
         use guard = lockCatalog()
         let items = readPackages()
         let id = preview.Manifest.Id
+        rejectTemporary id
         let old = packages[id]
         if old.PendingRemoval then invalidOp "旧包正在卸载，请先重试卸载。"
         if not (items |> Array.contains old) then invalidOp "安装记录已变化，请重新打开管理页。"
@@ -261,6 +400,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
         use guard = lockCatalog()
         let items = readPackages()
         let id = preview.Manifest.Id
+        rejectTemporary id
         match items |> Array.tryFind (fun item -> item.Id = id) with
         | Some item when item.Hash = preview.Hash && packages.ContainsKey id -> ()
         | Some _ -> invalidOp "同 ID 的包已安装。请确认替换版本。"
@@ -319,19 +459,20 @@ type LocalPlugins(host: Host, settingsFile: string) =
     // Copy privately on a worker before releasing the current version on the UI
     // thread. Page factories and registration continue to run on the UI thread.
     member _.EnableAsync(id, detach: unit -> unit) = task {
+        rejectTemporary id
         if packages.ContainsKey id && packages[id].PendingRemoval then invalidOp "请先完成卸载"
         match locations.TryGetValue id with
         | true, folder ->
-            let! snapshot, info = Task.Run(fun () -> copyOutput folder id)
+            let! snapshot = Task.Run(fun () -> copyOutput folder id)
             let mutable transferred = false
             try
                 detach()
                 host.Enable(id, fun registry ->
                     transferred <- true
-                    activate (snapshot, info) registry)
-                manifests[id] <- info
+                    activate snapshot registry)
+                manifests[id] <- snapshot.Manifest
             finally
-                if not transferred then snapshot.Delete(true)
+                if not transferred then snapshot.Release()
         | _ ->
             detach()
             host.Enable id

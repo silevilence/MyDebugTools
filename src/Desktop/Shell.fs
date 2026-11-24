@@ -125,7 +125,6 @@ type MainWindow() as window =
     let host = new Host()
     let catalog = LocalPlugins(host, Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "plugins.json"))
     let inspection = Inspection(host, catalog, fun read -> Avalonia.Threading.Dispatcher.UIThread.Invoke(Func<string>(read)))
-    let developer = new DeveloperServer(Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "developer.json"), Updates.current, inspection.Tools)
     let folderInput = TextBox(PlaceholderText = "本地插件编译目录")
     let cache = Dictionary<string, Control>()
     let menu = Menu()
@@ -182,6 +181,37 @@ type MainWindow() as window =
             | None -> return true
         | None -> return true
     }
+
+    let confirmTemporary id directory =
+        let dialog = Window(Title = "确认加载临时插件", Width = 480., SizeToContent = SizeToContent.Height,
+                            WindowStartupLocation = WindowStartupLocation.CenterOwner)
+        let body = StackPanel(Spacing = 8., Margin = Thickness 16.)
+        body.Children.Add(TextBlock(Text = $"加载本次编译快照？\n插件 ID · {id}\n来源目录 · {directory}", TextWrapping = Media.TextWrapping.Wrap))
+        body.Children.Add(button "取消" (fun () -> dialog.Close(false)) |> VirtualDom.create)
+        body.Children.Add(button "确认加载此快照" (fun () -> dialog.Close(true)) |> VirtualDom.create)
+        dialog.Content <- body
+        dialog.ShowDialog<bool>(window)
+
+    let changeOnDesktop work =
+        let run () = task {
+            if not manager.IsEnabled || opening then invalidOp "桌面正在更改插件，请稍后重试"
+            workspace.Save(catalog.FormalEnabled, current)
+            manager.IsEnabled <- false
+            menu.IsEnabled <- false
+            home.IsEnabled <- false
+            try return! work()
+            finally
+                manager.IsEnabled <- true
+                menu.IsEnabled <- true
+                home.IsEnabled <- true
+                if closeAfterChange then window.Close()
+        }
+        Avalonia.Threading.Dispatcher.UIThread.InvokeAsync<string>(Func<Threading.Tasks.Task<string>>(run))
+
+    let temporary = TemporaryCommands(catalog, changeOnDesktop, confirmTemporary,
+                                      (fun id -> continueChange id "切换"), fun () -> window.RefreshPlugins())
+    let developer = new DeveloperServer(Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "developer.json"),
+                                        Updates.current, inspection.Tools @ temporary.Tools)
 
     let updateNavigation id =
         current <- id
@@ -457,11 +487,12 @@ type MainWindow() as window =
             if matches plugin || (flat.IsChecked <> Nullable true && children |> List.exists (fun (_, c, _) -> matches c)) then
                 let row = grid()
                 let enabled = host.Enabled plugin.Id
-                let source = if plugin.Core then "随附核心" else catalog.Source plugin.Id
+                let source = if catalog.IsTemporary plugin.Id then "临时开发目录" elif plugin.Core then "随附核心" else catalog.Source plugin.Id
                 let state = if plugin.Core then "固定加载" elif enabled then "已启用" else "已停用"
                 let name = if plugin.Id.StartsWith("sample.") then plugin.Title + "（示例）" else plugin.Title
-                let path = catalog.Directory plugin.Id |> Option.defaultValue "宿主内置"
-                let version = catalog.Version plugin.Id
+                let temporaryRow = if catalog.IsTemporary plugin.Id then catalog.Status |> List.tryFind (fun row -> row.Id = plugin.Id && row.Source = "temporary") else None
+                let path = temporaryRow |> Option.map _.Origin |> Option.orElseWith (fun () -> catalog.Directory plugin.Id) |> Option.defaultValue "宿主内置"
+                let version = temporaryRow |> Option.map _.Version |> Option.defaultValue (catalog.Version plugin.Id)
                 let details = TextBox(IsReadOnly = true, TextWrapping = Media.TextWrapping.Wrap,
                                       Text = $"{plugin.Id} · {source} · 版本 {version}\n{path}")
                 let detailPanel = StackPanel(Spacing = 4.)
@@ -489,12 +520,14 @@ type MainWindow() as window =
                     field row 3 (TextBlock(Text = version))
                 field row (if wide then 4 else 1) (TextBlock(Text = state))
                 let commands = WrapPanel()
-                if not plugin.Core then
+                if catalog.IsTemporary plugin.Id then
+                    commands.Children.Add(TextBlock(Text = "通过 MCP 管理临时版"))
+                elif not plugin.Core then
                     let verb = if enabled then "停用" else "启用"
                     addAction commands $"{verb} {plugin.Title}" (fun () -> change plugin.Id false)
                     if enabled && (catalog.Directory plugin.Id).IsSome then
                         addAction commands $"重新加载 {plugin.Title}" (fun () -> change plugin.Id true)
-                if source.StartsWith("外部") then
+                if source.StartsWith("外部") && not (catalog.IsTemporary plugin.Id) then
                     let package = catalog.Package plugin.Id
                     let verb =
                         match package with
@@ -604,7 +637,7 @@ type MainWindow() as window =
                 e.Cancel <- true
                 closeAfterChange <- true
             elif not e.Cancel then
-                try workspace.Save([|for p in host.Plugins do if not p.Core && host.Enabled p.Id then yield p.Id|], current)
+                try workspace.Save(catalog.FormalEnabled, current)
                 with ex ->
                     feedback.Text <- $"布局未能保存 · {ex.Message}"
                     eprintfn "%s" feedback.Text)
@@ -616,6 +649,7 @@ type MainWindow() as window =
             clearMenu menu navigationHandlers
             clearMenu actionsMenu actionHandlers
             (host :> IDisposable).Dispose()
+            catalog.ReleaseTemporarySnapshots()
             catalog.CheckUnloads() |> ignore)
         AutomationProperties.SetName(folderInput, "本地插件编译目录")
         AutomationProperties.SetName(filter, "查找插件")
@@ -635,3 +669,5 @@ type MainWindow() as window =
             current <- workspace.Restore(enable, lookup) |> Option.defaultValue current
         with e -> feedback.Text <- $"布局无法恢复，已使用默认工作区。{e.Message}"
         refresh()
+
+    member private _.RefreshPlugins() = refresh()
