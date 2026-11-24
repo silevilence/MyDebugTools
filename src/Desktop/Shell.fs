@@ -135,6 +135,7 @@ type MainWindow() as window =
         menu.Items.Clear()
     let actionResult = TextBlock(Margin = Thickness(24., 0., 24., 8.))
     let workspace = Workspace(window)
+    let updates = Updates.Panel(window)
     let pageArea = workspace.Control
     let views = ShellMenuItem("视图")
     let toolMenu = ShellMenuItem("工具")
@@ -319,6 +320,8 @@ type MainWindow() as window =
         group "发送 HTTP 请求" "用 Web API 编辑 URL、发送请求并查看响应。" [
             "请求", ["web.api"], "web.api", "" ]
         home.Children.Add homeMessage
+        home.Children.Add(TextBlock(Text = $"MyDebugTools {Updates.current} · Windows x64"))
+        home.Children.Add updates.Check
         manager.Children.Clear()
         let addButton (parent: Panel) title run =
             parent.Children.Add(button title run |> VirtualDom.create)
@@ -561,6 +564,8 @@ type MainWindow() as window =
         monitorState.Start()
         DockPanel.SetDock(capture, Dock.Bottom)
         layout.Children.Add capture
+        DockPanel.SetDock(updates.Bar, Dock.Bottom)
+        layout.Children.Add updates.Bar
         layout.Children.Add pageArea
         window.Content <- layout
         window.KeyDown.Add(fun e ->

@@ -9,7 +9,11 @@
     <Compile Include="BindingPanel.fs" />
     <Compile Include="DllWorkbench.fs" />
     <Compile Include="Workspace.fs" />
+    <Compile Include="Updates.fs" />
     <Compile Include="Shell.fs" />
+    <PackageReference Include="NetSparkleUpdater.SparkleUpdater" Version="3.1.0" />
+    <AssemblyMetadata Include="UpdatePublicKey" Value="$(UpdatePublicKey)" />
+    <AssemblyMetadata Include="UpdateFeedUrl" Value="$(UpdateFeedUrl)" />
     <Compile Include="Program.fs" />
     <ProjectReference Include="../Host/Host.fsproj" />
     <ProjectReference Include="../WebApi/WebApi.fsproj" ReferenceOutputAssembly="false" />
