@@ -93,7 +93,11 @@ type MainWindow() as window =
     let manager = StackPanel(Spacing = 12.)
     let feedback = TextBlock(TextWrapping = Media.TextWrapping.Wrap)
     let mutable closeAfterChange = false
-    let mutable current = "core.manager"
+    let mutable current = "core.home"
+    let dllRequests = Event<string * string option>()
+    let home = StackPanel(Spacing = 8.)
+    let homeMessage = TextBlock(TextWrapping = Media.TextWrapping.Wrap)
+    let mutable opening = false
 
     let confirmStop target = task {
         let dialog = Window(Title = "停用监控插件", Width = 460., Height = 180.,
@@ -125,6 +129,8 @@ type MainWindow() as window =
                     with e -> actionResult.Text <- e.Message))
                 group.Items.Add item |> ignore
             actionsMenu.Items.Add group |> ignore
+        for item in menu.Items |> Seq.cast<MenuItem> do
+            item.FontWeight <- if unbox<string> item.Tag = id then Media.FontWeight.Bold else Media.FontWeight.Normal
         let page = host.Pages |> List.find (fun p -> p.Id = id)
         match cache.TryGetValue id with
         | true, control -> pageArea.Content <- control
@@ -132,6 +138,25 @@ type MainWindow() as window =
             let control = page.Create()
             cache.Add(id, control)
             pageArea.Content <- control
+
+    and openTask plugins destination tab file =
+        if not opening then
+            opening <- true
+            home.IsEnabled <- false
+            task {
+                try
+                    try
+                        for id in plugins do
+                            if not (host.Enabled id) then do! catalog.EnableAsync(id, ignore)
+                        current <- destination
+                        refresh()
+                        if destination = "dll.debugger" then dllRequests.Trigger(tab, file)
+                        pageArea.Focus() |> ignore
+                    with e -> homeMessage.Text <- $"打开失败。请到插件管理检查所需插件。{e.GetBaseException().Message}"
+                finally
+                    opening <- false
+                    home.IsEnabled <- true
+            } |> ignore
 
     and change id reload =
         task {
@@ -183,8 +208,30 @@ type MainWindow() as window =
         for page in pages do
             let item = ShellMenuItem(page.Title)
             let pageId = page.Id
+            item.Tag <- pageId
             navigationHandlers.Add(item.Click.Subscribe(fun _ -> navigate pageId))
             menu.Items.Add item |> ignore
+        home.Children.Clear()
+        home.Children.Add(TextBlock(Text = "开始调试", FontSize = 24.))
+        let group title description entries =
+            home.Children.Add(TextBlock(Text = title, FontSize = 18.))
+            home.Children.Add(TextBlock(Text = description, TextWrapping = Media.TextWrapping.Wrap))
+            let commands = WrapPanel()
+            for label, plugins, page, tab in entries do
+                let missing = plugins |> List.filter (host.Enabled >> not)
+                let caption = if missing.IsEmpty then $"打开{label}" else $"启用并打开{label}"
+                let b = Button(Content = caption, Margin = Thickness(0., 0., 8., 0.))
+                b.Click.Add(fun _ -> openTask plugins page tab None)
+                commands.Children.Add b
+            home.Children.Add commands
+        group "查看 DLL 导出或依赖" "用 DLL 工作台浏览文件和函数。依赖页签显示引用关系。" [
+            "导出", ["dll.debugger"], "dll.debugger", "导出"
+            "依赖", ["dll.debugger"; "dll.dependencies"], "dll.debugger", "依赖" ]
+        group "监控程序调用" "用 API 监控选择函数、观察调用记录。" [
+            "监控", ["api.monitor"], "api.monitor", "" ]
+        group "发送 HTTP 请求" "用 Web API 编辑 URL、发送请求并查看响应。" [
+            "请求", ["web.api"], "web.api", "" ]
+        home.Children.Add homeMessage
         manager.Children.Clear()
         let view = StackPanel.create [
             StackPanel.spacing 12.
@@ -213,7 +260,7 @@ type MainWindow() as window =
                         StackPanel.orientation Orientation.Horizontal
                         StackPanel.spacing 16.
                         StackPanel.children [
-                            TextBlock.create [ TextBlock.verticalAlignment VerticalAlignment.Center; TextBlock.text $"{plugin.Title}　{state}" ]
+                            TextBlock.create [ TextBlock.verticalAlignment VerticalAlignment.Center; TextBlock.text (if plugin.Id.StartsWith("sample.") then $"{plugin.Title}（示例）　{state}" else $"{plugin.Title}　{state}") ]
                             if not plugin.Core then
                                 let verb = if enabled then "停用" else "启用"
                                 button $"{verb} {plugin.Title}" (fun () -> change plugin.Id false)
@@ -237,9 +284,11 @@ type MainWindow() as window =
                 Id = page.Id; Title = page.Title; Core = true
                 Create = fun () -> { new IDesktopPlugin with member _.Activate reg = reg.Page page }
             }
+        pageArea.Focusable <- true
+        corePage { Id = "core.home"; Title = "首页"; Create = fun () -> ScrollViewer(Content = home) }
         corePage { Id = "core.manager"; Title = "插件管理"; Create = fun () -> ScrollViewer(Content = manager) }
         corePage { Id = "core.targets"; Title = "调试目标"; Create = targets window host }
-        host.Add { Id = "dll.debugger"; Title = "DLL 工作台"; Core = false; Create = fun () -> DllWorkbench.plugin window host }
+        host.Add { Id = "dll.debugger"; Title = "DLL 工作台"; Core = false; Create = fun () -> DllWorkbench.plugin window host dllRequests.Publish }
         host.Add { Id = "sample.workbench"; Title = "工作台"; Core = false; Create = fun () -> Workbench() }
         host.Add { Id = "sample.actions"; Title = "工作台扩展"; Core = false; Create = fun () -> WorkbenchActions() }
         let startupMessages = [

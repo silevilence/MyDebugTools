@@ -19,7 +19,7 @@ let private row (controls: Control list) =
     for c in controls do panel.Children.Add c
     panel
 
-let plugin (window: Window) (host: Host) =
+let plugin (window: Window) (host: Host) (requests: IObservable<string * string option>) =
     { new IDesktopPlugin with
         member _.Activate registry =
             let tabPoint = { DllTabPoint.PageId = "dll.debugger"; PointId = "tabs"; Version = 1 }
@@ -172,6 +172,10 @@ let plugin (window: Window) (host: Host) =
                                        member _.Dispose() =
                                            for _, _, view in mounted do view.Close() }
                     syncTabs()
+                    registry.Own(requests.Subscribe(fun (title, file) ->
+                        file |> Option.iter openFile
+                        tabs.Items |> Seq.cast<TabItem> |> Seq.tryFind (fun item -> string item.Header = title)
+                        |> Option.iter (fun item -> tabs.SelectedItem <- item)))
                     let layout = DockPanel()
                     DockPanel.SetDock(header, Dock.Top)
                     layout.Children.Add header
