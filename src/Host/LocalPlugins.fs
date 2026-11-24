@@ -195,6 +195,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
         let items = readPackages()
         let id = preview.Manifest.Id
         let old = packages[id]
+        if old.PendingRemoval then invalidOp "旧包正在卸载，请先重试卸载。"
         if not (items |> Array.contains old) then invalidOp "安装记录已变化，请重新打开管理页。"
         let previousFolder = packageFolder old
         let previousManifest = manifests[id]
@@ -202,27 +203,32 @@ type LocalPlugins(host: Host, settingsFile: string) =
         let updated = { old with Hash = preview.Hash; Folder = Guid.NewGuid().ToString("N"); Source = preview.Source }
         let folder = packageFolder updated
         Directory.CreateDirectory folder |> ignore
+        let mutable stage = "校验并解包"
         let mutable removed = false
         let mutable attached = false
         try
             PluginPackage.extract preview folder
+            stage <- "撤下旧版"
             host.Remove id
             removed <- true
             detached()
             locations.Remove id |> ignore
+            stage <- "注册新版"
             attach folder preview.Manifest
             attached <- true
+            stage <- "启用新版"
             host.Enable id
+            stage <- "保存安装记录"
             savePackages (items |> Array.map (fun item -> if item.Id = id then updated else item))
             packages[id] <- updated
-        with _ ->
+        with error ->
             if attached then host.Remove id
             if removed then
                 locations.Remove id |> ignore
                 attach previousFolder previousManifest
                 if enabled then host.Enable id
             Directory.Delete(folder, true)
-            reraise()
+            raise (InvalidOperationException($"{stage}失败 · {error.Message}", error))
         Directory.Delete(previousFolder, true)
 
     member this.Install(preview: PackagePreview) =
@@ -237,21 +243,25 @@ type LocalPlugins(host: Host, settingsFile: string) =
             let item = { Id = id; Folder = Guid.NewGuid().ToString("N"); Hash = preview.Hash; Source = preview.Source; PendingRemoval = false }
             let folder = packageFolder item
             Directory.CreateDirectory folder |> ignore
+            let mutable stage = "校验并解包"
             let mutable attached = false
             try
                 PluginPackage.extract preview folder
+                stage <- "注册插件"
                 attach folder preview.Manifest
                 attached <- true
+                stage <- "启用插件"
                 host.Enable id
+                stage <- "保存安装记录"
                 savePackages (Array.append items [|item|])
                 packages.Add(id, item)
-            with _ ->
+            with error ->
                 if attached then
                     host.Remove id
                     locations.Remove id |> ignore
                     manifests.Remove id |> ignore
                 Directory.Delete(folder, true)
-                reraise()
+                raise (InvalidOperationException($"{stage}失败 · {error.Message}", error))
 
     member _.Relations id =
         match host.Relations id, manifests.TryGetValue id with

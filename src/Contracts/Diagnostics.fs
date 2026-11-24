@@ -12,7 +12,7 @@ module Diagnostics =
     let summary page action subject reason =
         let version = Assembly.GetEntryAssembly().GetName().Version
         let clean text =
-            let paths = Regex.Replace(text, @"(?i)(?:[A-Z]:\\|\\\\)[^""'\r\n]*\\([^\\\r\n""']+)", "$1")
+            let paths = Regex.Replace(text, @"(?i)(?:[A-Z]:[\\/]|\\\\)[^""'\r\n]*[\\/]([^\\/\r\n""']+)", "$1")
             let urls = Regex.Replace(paths, @"(?i)\bhttps?://[^\s""']+", fun m ->
                 match Uri.TryCreate(m.Value, UriKind.Absolute) with
                 | true, uri -> uri.Scheme + "://" + uri.IdnHost

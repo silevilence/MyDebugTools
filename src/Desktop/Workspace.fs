@@ -3,6 +3,9 @@ namespace MyDebugTools.Desktop
 open System
 open System.Collections.Generic
 open Avalonia.Controls
+open Avalonia.Input
+open Avalonia.Interactivity
+open Avalonia.VisualTree
 open Dock.Avalonia.Controls
 open Dock.Model.Avalonia
 open Dock.Model.Avalonia.Controls
@@ -48,6 +51,31 @@ type Workspace(window: Window) =
         match doc.Owner with
         | :? IDock as parent -> parent.VisibleDockables <> null && parent.VisibleDockables.Contains(doc)
         | _ -> false
+    let remember (layout: IRootDock) (doc: Document) =
+        let group = doc.Owner :?> IDock
+        let floating = factory.FindRoot(doc, Func<IRootDock, bool>(fun _ -> true))
+        let floatWindow =
+            if isNull floating || obj.ReferenceEquals(floating, layout) then None
+            elif not (isNull floating.Window) then Some floating.Window
+            elif isNull layout.Windows then None
+            else layout.Windows |> Seq.tryFind (fun w -> obj.ReferenceEquals(w.Layout, floating))
+        let bounds =
+            match floatWindow with
+            | None -> [||]
+            | Some w ->
+                w.Save()
+                [| w.X; w.Y; w.Width; w.Height |]
+        let side =
+            match group.Owner with
+            | :? ProportionalDock as split ->
+                let first = split.VisibleDockables.IndexOf(group) = 0
+                if split.Orientation = Orientation.Vertical then (if first then "Top" else "Bottom")
+                else (if first then "Left" else "Right")
+            | _ -> ""
+        positions[doc.Id] <-
+            { Group = group.Id; Index = group.VisibleDockables.IndexOf doc; Side = side
+              Proportion = if Double.IsFinite group.Proportion then group.Proportion else 0.5
+              Bounds = bounds }
     do
         center.VisibleDockables <- factory.CreateList<IDockable>()
         root.VisibleDockables <- factory.CreateList<IDockable>(center)
@@ -57,6 +85,20 @@ type Workspace(window: Window) =
         factory.InitLayout(root)
         view.Factory <- factory
         view.Layout <- root
+        let mutable tabPointer: IPointer option = None
+        view.AddHandler(InputElement.PointerPressedEvent, (fun _ (e: PointerPressedEventArgs) ->
+            match e.Source with
+            | :? Avalonia.Visual as source when source.GetSelfAndVisualAncestors() |> Seq.exists (fun v -> v :? DocumentTabStripItem) ->
+                tabPointer <- Some e.Pointer
+            | _ -> tabPointer <- None), RoutingStrategies.Tunnel)
+        view.AddHandler(InputElement.PointerReleasedEvent, (fun _ _ -> tabPointer <- None), RoutingStrategies.Tunnel)
+        window.AddHandler(InputElement.KeyDownEvent, (fun _ (e: KeyEventArgs) ->
+            match e.Key, tabPointer with
+            | Key.Escape, Some pointer when not (isNull pointer.Captured) ->
+                pointer.Capture(null)
+                tabPointer <- None
+                e.Handled <- true
+            | _ -> ()), RoutingStrategies.Tunnel)
         factory.FocusedDockableChanged.Add(fun e ->
             match e.Dockable with
             | :? Document as d when documents.ContainsKey d.Id -> focused.Trigger d.Id
@@ -138,7 +180,9 @@ type Workspace(window: Window) =
             | :? Document as doc ->
                 match lookup doc.Id with
                 | Some (title, control) -> doc.Title <- title; doc.Content <- template control; documents[doc.Id] <- doc
-                | None -> factory.RemoveDockable(doc, true)
+                | None ->
+                    remember restored doc
+                    factory.RemoveDockable(doc, true)
             | _ -> ()
         root <- restored
         center <- main
@@ -157,6 +201,11 @@ type Workspace(window: Window) =
         let openIds = documents |> Seq.choose (fun kv -> if isOpen kv.Value then Some kv.Key else None) |> Seq.toArray
         for id in openIds do this.Move(id, "合并标签")
 
+    member _.Close() =
+        if root.Windows <> null then for floating in root.Windows |> Seq.toArray do floating.Exit()
+        for doc in documents.Values do doc.Content <- null
+        documents.Clear()
+        view.Layout <- null
     member _.Control = view
     member _.Focused = focused.Publish
     member _.IsOpen(id) =
@@ -171,9 +220,6 @@ type Workspace(window: Window) =
                 item
         recent.Remove id |> ignore
         recent.Add id
-        if not (isOpen doc) then factory.AddDockable(center, doc)
-        factory.SetActiveDockable doc
-        factory.SetFocusedDockable(root, doc)
         match positions.TryGetValue id with
         | true, pos ->
             positions.Remove id |> ignore
@@ -182,9 +228,10 @@ type Workspace(window: Window) =
                 else factory.FindDockable(root, Func<IDockable, bool>(fun d -> d.Id = pos.Group))
             match destination with
             | :? DocumentDock as destination ->
-                factory.RemoveDockable(doc, false)
-                factory.InsertDockable(destination, doc, min pos.Index destination.VisibleDockables.Count)
+                if isOpen doc then factory.RemoveDockable(doc, false)
+                factory.InsertDockable(destination, doc, max 0 (min pos.Index destination.VisibleDockables.Count))
             | _ when pos.Bounds.Length = 4 ->
+                factory.AddDockable(center, doc)
                 factory.FloatDockable doc
                 match factory.FindRoot(doc, Func<IRootDock, bool>(fun _ -> true)) with
                 | floating when not (isNull floating) && not (isNull floating.Window) ->
@@ -195,10 +242,14 @@ type Workspace(window: Window) =
                     w.Height <- pos.Bounds[3]
                 | _ -> ()
             | _ when pos.Side <> "" ->
+                factory.AddDockable(center, doc)
                 this.Move(id, pos.Side)
                 match doc.Owner with :? IDock as group -> group.Proportion <- pos.Proportion | _ -> ()
-            | _ -> ()
+            | _ -> factory.AddDockable(center, doc)
+        | _ when not (isOpen doc) -> factory.AddDockable(center, doc)
         | _ -> ()
+        factory.SetActiveDockable doc
+        factory.SetFocusedDockable(root, doc)
     member _.NeedsMount id = positions.ContainsKey id
     member _.Forget id = positions.Remove id |> ignore
     member _.Move(id, operation) =
@@ -231,29 +282,7 @@ type Workspace(window: Window) =
         match documents.TryGetValue id with
         | true, doc ->
             if isOpen doc then
-                let group = doc.Owner :?> IDock
-                let floating = factory.FindRoot(doc, Func<IRootDock, bool>(fun _ -> true))
-                let floatWindow =
-                    if isNull floating then None
-                    elif not (isNull floating.Window) then Some floating.Window
-                    elif isNull root.Windows then None
-                    else root.Windows |> Seq.tryFind (fun w -> obj.ReferenceEquals(w.Layout, floating))
-                let bounds =
-                    match floatWindow with
-                    | None -> [||]
-                    | Some w ->
-                        w.Save()
-                        [| w.X; w.Y; w.Width; w.Height |]
-                let side =
-                    match group.Owner with
-                    | :? ProportionalDock as split ->
-                        let first = split.VisibleDockables.IndexOf(group) = 0
-                        if split.Orientation = Orientation.Vertical then (if first then "Top" else "Bottom")
-                        else (if first then "Left" else "Right")
-                    | _ -> ""
-                positions[id] <- { Group = group.Id; Index = group.VisibleDockables.IndexOf doc; Side = side
-                                   Proportion = if Double.IsFinite group.Proportion then group.Proportion else 0.5
-                                   Bounds = bounds }
+                remember root doc
             doc.Content <- null
             if isOpen doc then factory.RemoveDockable(doc, true)
             documents.Remove id |> ignore

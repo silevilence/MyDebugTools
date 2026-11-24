@@ -138,11 +138,12 @@ type MainWindow() as window =
     let pageArea = workspace.Control
     let views = ShellMenuItem("视图")
     let toolMenu = ShellMenuItem("工具")
-    let manager = StackPanel(Spacing = 12.)
+    let manager = StackPanel(Spacing = 8.)
     let feedback = TextBlock(TextWrapping = Media.TextWrapping.Wrap)
     let managerDiagnostic = DiagnosticPanel()
     let filter = TextBox(PlaceholderText = "按插件名称查找")
     let flat = CheckBox(Content = "全部插件（平表）")
+    let notices = Dictionary<string, string>()
     let rows = StackPanel(Spacing = 4.)
     let mutable closeAfterChange = false
     let mutable current = "core.home"
@@ -164,6 +165,18 @@ type MainWindow() as window =
             ]
         ] |> VirtualDom.create
         return! dialog.ShowDialog<bool>(window)
+    }
+
+    let continueChange id verb = task {
+        match host.Monitor id with
+        | Some session ->
+            match session.Target() with
+            | Some target ->
+                let! stop = confirmStop target verb
+                if stop then do! session.Stop()
+                return stop
+            | None -> return true
+        | None -> return true
     }
 
     let updateNavigation id =
@@ -220,17 +233,7 @@ type MainWindow() as window =
             try
                 try
                     let enabled = host.Enabled id
-                    let! proceed = task {
-                        match host.Monitor id with
-                        | Some session ->
-                            match session.Target() with
-                            | Some target ->
-                                let! stop = confirmStop target (if reload then "重新加载" else "停用")
-                                if stop then do! session.Stop()
-                                return stop
-                            | None -> return true
-                        | None -> return true
-                    }
+                    let! proceed = continueChange id (if reload then "重新加载" else "停用")
                     if proceed then
                         let detach () =
                             if enabled then
@@ -239,8 +242,10 @@ type MainWindow() as window =
                         if reload || not enabled then do! catalog.EnableAsync(id, detach)
                         else detach()
                         feedback.Text <- ""
+                        notices[id] <- if reload then "已重新加载" elif enabled then "已停用" else "已启用"
                 with e ->
                     feedback.Text <- e.GetBaseException().Message
+                    notices[id] <- feedback.Text
                     managerDiagnostic.Show("插件管理", (if reload then "重新加载" else "更改启用状态"), id, feedback.Text)
             finally
                 refresh()
@@ -262,6 +267,7 @@ type MainWindow() as window =
         refresh()
 
     and refresh () =
+        let destination = current
         let pages = host.Pages
         for id in cache.Keys |> Seq.toArray do
             if pages |> List.exists (fun p -> p.Id = id) |> not then
@@ -281,9 +287,7 @@ type MainWindow() as window =
         views.Items.Clear()
         for page in pages do
             let item = ShellMenuItem(page.Title, ToggleType = MenuItemToggleType.CheckBox, IsChecked = workspace.IsOpen page.Id)
-            navigationHandlers.Add(item.Click.Subscribe(fun _ ->
-                if workspace.IsOpen page.Id then workspace.Move(page.Id, "隐藏")
-                else navigate page.Id))
+            navigationHandlers.Add(item.Click.Subscribe(fun _ -> navigate page.Id))
             views.Items.Add item |> ignore
         for title, action in ["向左停靠","Left"; "向右停靠","Right"; "向上停靠","Top"; "向下停靠","Bottom"; "合并标签","合并标签"; "浮动","浮动"; "隐藏","隐藏"] do
             let item = ShellMenuItem(title)
@@ -319,10 +323,7 @@ type MainWindow() as window =
         let addButton (parent: Panel) title run =
             parent.Children.Add(button title run |> VirtualDom.create)
         manager.Children.Add(TextBlock(Text = "插件管理", FontSize = 24.))
-        manager.Children.Add(TextBlock(Text = "本地插件编译目录"))
-        manager.Children.Add folderInput
         let tools = WrapPanel()
-        addButton tools "添加目录" (fun () -> addDirectory folderInput.Text)
         addButton tools "关联开发目录…" (fun () ->
             task {
                 let! folders = window.StorageProvider.OpenFolderPickerAsync(FolderPickerOpenOptions(Title = "选择插件编译目录"))
@@ -337,7 +338,14 @@ type MainWindow() as window =
                         let m = preview.Manifest
                         let version = if String.IsNullOrWhiteSpace m.Version then "未知" else m.Version
                         let existing = host.Plugins |> List.tryFind (fun p -> p.Id = m.Id)
-                        let prior = existing |> Option.map (fun p -> p.Title + " · " + catalog.Source p.Id) |> Option.defaultValue "无"
+                        let prior =
+                            existing |> Option.map (fun p ->
+                                let source =
+                                    match catalog.Package p.Id, catalog.Directory p.Id with
+                                    | Some package, _ -> $"外部 ZIP · {package.Source}"
+                                    | _, Some path -> $"{catalog.Source p.Id} · {path}"
+                                    | _ -> if p.Core then "随附核心" else "随附普通"
+                                $"{p.Title} · 版本 {catalog.Version p.Id} · {source}") |> Option.defaultValue "无"
                         match catalog.Package m.Id with
                         | Some old when old.Hash = preview.Hash ->
                             filter.Text <- m.Id
@@ -352,14 +360,7 @@ type MainWindow() as window =
                             dialog.Content <- content
                             let! ok = dialog.ShowDialog<bool>(window)
                             if ok then
-                                let! proceed = task {
-                                    match host.Monitor m.Id with
-                                    | Some session when (session.Target()).IsSome ->
-                                        let! ok = confirmStop (session.Target() |> Option.defaultValue "") "替换"
-                                        if ok then do! session.Stop()
-                                        return ok
-                                    | _ -> return true
-                                }
+                                let! proceed = continueChange m.Id "替换"
                                 if proceed then
                                     try
                                         if (catalog.Package m.Id).IsSome then catalog.Replace(preview, refresh)
@@ -368,8 +369,8 @@ type MainWindow() as window =
                                         feedback.Text <- $"已启用 · {m.Title}"
                                     finally refresh()
                 with e ->
-                    feedback.Text <- $"加载插件包失败。请检查 ZIP 和入口程序集。{e.GetBaseException().Message}"
-                    managerDiagnostic.Show("插件管理", "加载插件包", "本地 ZIP", e.GetBaseException().Message)
+                    feedback.Text <- $"加载插件包失败。请检查 ZIP 和入口程序集。{e.Message}"
+                    managerDiagnostic.Show("插件管理", "加载插件包", "本地 ZIP", e.Message)
             } |> ignore)
         manager.Children.Add tools
         manager.Children.Add feedback
@@ -380,13 +381,15 @@ type MainWindow() as window =
             let waiting = if pending.IsEmpty then "无" else String.concat "、" pending
             feedback.Text <- $"已回收 {count} 个旧版本。仍待回收：{waiting}"
             managerDiagnostic.Show("插件管理", "检查卸载", "旧插件程序集", feedback.Text))
-        manager.Children.Add(Expander(Header = "卸载诊断", Content = checks))
         manager.Children.Add(TextBlock(Text = "查找插件"))
         manager.Children.Add filter
         manager.Children.Add flat
         manager.Children.Add rows
+        manager.Children.Add(TextBlock(Text = "本地插件编译目录"))
+        manager.Children.Add folderInput
+        addButton manager "添加目录" (fun () -> addDirectory folderInput.Text)
+        manager.Children.Add(Expander(Header = "卸载诊断", Content = checks))
         renderRows()
-        let destination = current
         for page in pages do
             if not (cache.ContainsKey page.Id) && workspace.NeedsMount page.Id then navigate page.Id
         current <- destination
@@ -395,13 +398,13 @@ type MainWindow() as window =
     and renderRows () =
         rows.Children.Clear()
         let wide = window.ClientSize.Width >= 760.
-        let columns = if wide then "2*,*,*,*,2*" else "2*,*,2*"
+        let columns = if wide then "2*,1.6*,*,*,*,2*" else "2*,*,2*"
         let field (grid: Grid) col (control: Control) =
             Grid.SetColumn(control, col)
             grid.Children.Add control
         let grid () = Grid(ColumnDefinitions = ColumnDefinitions(columns), ColumnSpacing = 8.)
         let heading = grid()
-        let titles = if wide then ["名称 / 用途"; "来源"; "版本"; "状态"; "操作"] else ["名称"; "状态"; "操作"]
+        let titles = if wide then ["名称"; "界面 / 扩展"; "来源"; "版本"; "状态"; "操作"] else ["名称"; "状态"; "操作"]
         titles |> List.iteri (fun i s -> field heading i (TextBlock(Text = s)))
         rows.Children.Add heading
         let query = string filter.Text
@@ -436,17 +439,27 @@ type MainWindow() as window =
                 let detailPanel = StackPanel(Spacing = 4.)
                 detailPanel.Children.Add details
                 if info.IsNone then detailPanel.Children.Add(TextBlock(Text = "关系待识别"))
-                for page in pages do detailPanel.Children.Add(TextBlock(Text = $"提供界面 · {page}"))
-                for target, title in targets do detailPanel.Children.Add(TextBlock(Text = $"{title} → {target}", TextWrapping = Media.TextWrapping.Wrap))
-                if flat.IsChecked <> Nullable true then
-                    for page, child, title in children do
-                        addAction detailPanel $"{page} → {child.Title} · {title}" (fun () -> flat.IsChecked <- Nullable true; filter.Text <- child.Id)
                 let expanded = query <> "" && not (matches plugin)
+                let pageTitle id =
+                    host.Pages |> List.tryFind (fun p -> p.Id = id) |> Option.map _.Title
+                    |> Option.defaultValue (if id = plugin.Id then plugin.Title else id)
+                for page in pages do
+                    let links = children |> List.filter (fun (id, _, _) -> id = page)
+                    if links.IsEmpty || flat.IsChecked = Nullable true then
+                        detailPanel.Children.Add(TextBlock(Text = $"提供界面 · {pageTitle page} · {page}"))
+                    else
+                        let references = StackPanel(Spacing = 4.)
+                        for _, child, title in links do
+                            addAction references $"{child.Title} · {title}" (fun () -> flat.IsChecked <- Nullable true; filter.Text <- child.Id)
+                        detailPanel.Children.Add(Expander(Header = $"提供界面 · {pageTitle page} · {page}", Content = references, IsExpanded = expanded))
+                for target, title in targets do detailPanel.Children.Add(TextBlock(Text = $"{title} → {target}", TextWrapping = Media.TextWrapping.Wrap))
                 field row 0 (Expander(Header = name, Content = detailPanel, IsExpanded = expanded))
                 if wide then
-                    field row 1 (TextBlock(Text = source))
-                    field row 2 (TextBlock(Text = version))
-                field row (if wide then 3 else 1) (TextBlock(Text = state))
+                    let summary = (pages |> List.map pageTitle) @ (targets |> List.map snd) |> List.distinct |> String.concat "、"
+                    field row 1 (TextBlock(Text = (if info.IsNone then "待识别" else summary), TextWrapping = Media.TextWrapping.Wrap))
+                    field row 2 (TextBlock(Text = source))
+                    field row 3 (TextBlock(Text = version))
+                field row (if wide then 4 else 1) (TextBlock(Text = state))
                 let commands = WrapPanel()
                 if not plugin.Core then
                     let verb = if enabled then "停用" else "启用"
@@ -467,21 +480,18 @@ type MainWindow() as window =
                                                     WindowStartupLocation = WindowStartupLocation.CenterOwner)
                                 let body = StackPanel(Spacing = 8., Margin = Thickness 16.)
                                 let scope = if package.IsSome then "清理受管副本" else "保留编译目录"
-                                let affected = List.append pages (List.map snd targets) |> String.concat "、"
+                                let affected =
+                                    [ yield! pages
+                                      yield! List.map snd targets
+                                      for _, child, extension in children -> $"{child.Title} · {extension}" ]
+                                    |> List.distinct |> String.concat "、"
                                 body.Children.Add(TextBlock(Text = $"{plugin.Title} · {plugin.Id}\n界面与扩展 · {affected}\n{scope} · {path}", TextWrapping = Media.TextWrapping.Wrap))
                                 addAction body "取消" (fun () -> dialog.Close(false))
                                 addAction body ("确认" + verb) (fun () -> dialog.Close(true))
                                 dialog.Content <- body
                                 let! ok = dialog.ShowDialog<bool>(window)
                                 if ok then
-                                    let! proceed = task {
-                                        match host.Monitor plugin.Id with
-                                        | Some session when (session.Target()).IsSome ->
-                                            let! stop = confirmStop (session.Target() |> Option.defaultValue "") verb
-                                            if stop then do! session.Stop()
-                                            return stop
-                                        | _ -> return true
-                                    }
+                                    let! proceed = continueChange plugin.Id verb
                                     if proceed then
                                         catalog.RemoveExternal(plugin.Id, refresh)
                                         for page in pages do workspace.Forget page
@@ -492,9 +502,16 @@ type MainWindow() as window =
                                 managerDiagnostic.Show("插件管理", verb, plugin.Id, e.Message)
                             refresh()
                         } |> ignore)
-                field row (if wide then 4 else 2) commands
+                field row (if wide then 5 else 2) commands
                 rows.Children.Add row
-                for reason in host.Mismatches plugin.Id do rows.Children.Add(TextBlock(Text = reason, TextWrapping = Media.TextWrapping.Wrap))
+                match notices.TryGetValue plugin.Id with
+                | true, notice -> rows.Children.Add(TextBlock(Text = $"{plugin.Title} · {notice}", TextWrapping = Media.TextWrapping.Wrap))
+                | _ -> ()
+                for reason in host.Mismatches plugin.Id do
+                    rows.Children.Add(TextBlock(Text = reason, TextWrapping = Media.TextWrapping.Wrap))
+                    let report = DiagnosticPanel()
+                    report.Show("插件管理", "匹配扩展契约", plugin.Id, reason)
+                    rows.Children.Add report.Control
 
     and addAction (panel: Panel) label run =
         panel.Children.Add(button label run |> VirtualDom.create)
@@ -563,7 +580,7 @@ type MainWindow() as window =
                     eprintfn "%s" feedback.Text)
         window.Closed.Add(fun _ ->
             monitorState.Stop()
-            for id in cache.Keys do workspace.Remove id
+            workspace.Close()
             cache.Clear()
             clearMenu menu navigationHandlers
             clearMenu actionsMenu actionHandlers
