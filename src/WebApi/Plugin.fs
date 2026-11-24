@@ -18,6 +18,8 @@ type Plugin() =
             registry.Own events
             registry.Own sender
 
+            let outlet = PanelOutlet("HTTP 响应")
+            registry.Page { Id = "web.api.response"; Title = "HTTP 响应"; Create = fun () -> outlet.Companion }
             registry.Page {
                 Id = "web.api"; Title = "Web API"
                 Create = fun () ->
@@ -33,7 +35,8 @@ type Plugin() =
                     let body = BodyEditor(events)
                     let status = TextBlock(TextWrapping = TextWrapping.Wrap)
                     let responseView = ResponseView(events)
-                    let response = tab "响应" responseView.Content
+                    outlet.Set(ScrollViewer(Content = responseView.Content))
+                    let response = TabItem(Header = "响应", Content = outlet.Inline)
                     let tabs = TabControl()
                     let paramsContent = stack [parameters.Content(events)]
                     let paramsTab = tab "参数" paramsContent

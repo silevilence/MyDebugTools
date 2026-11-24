@@ -32,3 +32,26 @@ type ExpandableTreeItem(title: string) as item =
     do AutomationProperties.SetName(item, title)
     override _.StyleKeyOverride = typeof<TreeViewItem>
     override _.OnCreateAutomationPeer() = BranchPeer(item)
+
+/// A panel has one live control. Docking moves it between the ordinary task tab
+/// and the shell document without restarting the underlying operation.
+type PanelOutlet(title: string) =
+    let inlineHost = ContentControl()
+    let companion = ContentControl()
+    let hint text = TextBlock(Text = text, TextWrapping = TextWrapping.Wrap) :> Control
+    let mutable content = hint $"打开主工具后可在这里查看{title}。"
+    let mutable detached = false
+    let move () =
+        inlineHost.Content <- null
+        companion.Content <- null
+        if detached then
+            inlineHost.Content <- hint $"{title}已在独立面板中打开。"
+            companion.Content <- content
+        else inlineHost.Content <- content
+    do
+        companion.AttachedToVisualTree.Add(fun _ -> detached <- true; move())
+        companion.DetachedFromVisualTree.Add(fun _ -> detached <- false; move())
+        move()
+    member _.Inline = inlineHost
+    member _.Companion = companion :> Control
+    member _.Set(value: Control) = content <- value; move()

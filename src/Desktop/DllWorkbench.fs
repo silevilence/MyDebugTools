@@ -29,6 +29,8 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                 session |> Option.iter (fun s -> s.Dispose())
                 session <- None
             registry.Own { new IDisposable with member _.Dispose() = restart() }
+            let results = PanelOutlet("调用结果")
+            registry.Page { Id = "dll.debugger.result"; Title = "调用结果"; Create = fun () -> results.Companion }
             registry.Page {
                 Id = "dll.debugger"; Title = "DLL 工作台"
                 Create = fun () ->
@@ -194,7 +196,8 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                         with e -> callContext.Text <- e.Message
                     panel.Children.Add(button "按已确认签名填写" editArguments)
                     panel.Children.Add callFields
-                    panel.Children.Add callContext
+                    let resultBody = StackPanel(Spacing = 4.)
+                    resultBody.Children.Add callContext
                     entry.TextChanged.Add(fun _ -> callFields.Children.Clear())
                     panel.Children.Add(TextBlock(Text = "调用参数（JSON 对象，如 {\"a\":2,\"b\":3}）"))
                     panel.Children.Add arguments
@@ -233,8 +236,10 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                             dialog.Content <- body
                             dialog.ShowDialog(window) |> ignore)
                     ])
-                    panel.Children.Add resultSummary
-                    panel.Children.Add output
+                    resultBody.Children.Add resultSummary
+                    resultBody.Children.Add output
+                    results.Set(ScrollViewer(Content = resultBody))
+                    panel.Children.Add results.Inline
                     panel.Children.Add bindings.Control
                     let tabItem title (content: Control) =
                         let item = TabItem(Header = title, Content = content)

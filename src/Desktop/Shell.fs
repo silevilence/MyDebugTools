@@ -518,6 +518,16 @@ type MainWindow() as window =
         layout.Children.Add actionsMenu
         DockPanel.SetDock(actionResult, Dock.Bottom)
         layout.Children.Add actionResult
+        let capture = Button(IsVisible = false)
+        capture.Click.Add(fun _ -> navigate "api.monitor")
+        let monitorState = Avalonia.Threading.DispatcherTimer(Interval = TimeSpan.FromSeconds 1.)
+        monitorState.Tick.Add(fun _ ->
+            let active = host.Monitor "api.monitor" |> Option.bind (fun session -> session.Target())
+            capture.IsVisible <- active.IsSome
+            active |> Option.iter (fun s -> capture.Content <- $"查看采集 · {s}"))
+        monitorState.Start()
+        DockPanel.SetDock(capture, Dock.Bottom)
+        layout.Children.Add capture
         layout.Children.Add pageArea
         window.Content <- layout
         window.Closing.Add(fun e ->
@@ -528,6 +538,7 @@ type MainWindow() as window =
                 try workspace.Save([|for p in host.Plugins do if not p.Core && host.Enabled p.Id then yield p.Id|], current)
                 with ex -> feedback.Text <- $"布局未能保存 · {ex.Message}")
         window.Closed.Add(fun _ ->
+            monitorState.Stop()
             for id in cache.Keys do workspace.Remove id
             cache.Clear()
             clearMenu menu navigationHandlers

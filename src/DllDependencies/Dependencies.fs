@@ -209,5 +209,13 @@ module internal View =
 type Plugin() =
     interface IDesktopPlugin with
         member _.Activate registry =
+            let outlet = PanelOutlet("DLL 依赖")
+            registry.Page { Id = "dll.dependencies.detail"; Title = "依赖详情"; Create = fun () -> outlet.Companion }
+            let create () =
+                let view = View.create()
+                outlet.Set view.Content
+                { view with Content = outlet.Inline; Close = fun () ->
+                                view.Close()
+                                outlet.Set(TextBlock(Text = "请打开 DLL 工作台查看当前文件的依赖。")) }
             registry.DllTab { PageId = "dll.debugger"; PointId = "tabs"; MinVersion = 1; MaxVersion = 1
-                              Title = "依赖"; Create = View.create }
+                              Title = "依赖"; Create = create }

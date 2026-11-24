@@ -22,7 +22,7 @@ Status: ready-for-agent
 | 全部插件表格、界面提供方与扩展层级 | 已实施，待统一验收 | G、J |
 | 外部 ZIP 加载、换版、卸载与开发目录解除关联 | 已实施，待统一验收 | G、K |
 | 主工作区、停靠、浮动、视图菜单和布局恢复 | 候选已接入，待浮窗与重载实测 | I、L |
-| 连续操作中的草稿、选择、结果归属与对照 | 待开始 | C–F、M |
+| 连续操作中的草稿、选择、结果归属与对照 | 已实施，待统一验收 | C–F、M |
 | 发布版回归与首次使用者任务 | 待开始 | A–M、四张任务卡 |
 
 ## 实施工单
@@ -50,7 +50,7 @@ Status: ready-for-agent
 | [0005-15 持续阅读、筛选和回看采集记录](issues/15-read-monitor-session.md) | 无 | 已实施，待统一验收 |
 | [0005-16 编辑并发送一次 HTTP 请求](issues/16-compose-http-request.md) | 无 | 已实施，待统一验收 |
 | [0005-17 在定义、草稿与请求日志间切换](issues/17-preserve-http-drafts.md) | 无 | 已实施，待统一验收 |
-| [0005-18 在 Dock 中对照输入与结果](issues/18-dock-debug-results.md) | 08 | 待开始 |
+| [0005-18 在 Dock 中对照输入与结果](issues/18-dock-debug-results.md) | 08 | 已实施，待统一验收 |
 | [0005-19 从各工具复制可用的错误报告](issues/19-copy-tool-diagnostics.md) | 02 | 待开始 |
 | [0005-20 发布版回归与首次使用者验收](issues/20-desktop-acceptance.md) | 01–19 | 待开始 |
 
