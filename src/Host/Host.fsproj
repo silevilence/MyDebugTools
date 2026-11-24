@@ -3,6 +3,10 @@
     <AssemblyName>MyDebugTools.Host</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="DeveloperServer.fs" />
+    <EmbeddedResource Include="PluginDevelopment.md" LogicalName="PluginDevelopment.md" />
+    <EmbeddedResource Include="../Contracts/Plugin.fs" LogicalName="Plugin.fs" />
+    <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
     <Compile Include="Targets.fs" />
     <Compile Include="Host.fs" />
     <Compile Include="PluginPackage.fs" />

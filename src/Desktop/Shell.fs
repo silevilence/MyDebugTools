@@ -12,6 +12,7 @@ open Avalonia.Interactivity
 open Avalonia.FuncUI.DSL
 open Avalonia.FuncUI.VirtualDom
 open Avalonia.Layout
+open Avalonia.Input.Platform
 open Avalonia.Platform.Storage
 open MyDebugTools.Contracts
 open MyDebugTools.Host
@@ -123,6 +124,7 @@ type MainWindow() as window =
     inherit Window(Title = "MyDebugTools", Width = 860., Height = 580., MinWidth = 580., MinHeight = 400.)
     let host = new Host()
     let catalog = LocalPlugins(host, Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "plugins.json"))
+    let developer = new DeveloperServer(Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "developer.json"), Updates.current, [])
     let folderInput = TextBox(PlaceholderText = "本地插件编译目录")
     let cache = Dictionary<string, Control>()
     let menu = Menu()
@@ -326,6 +328,28 @@ type MainWindow() as window =
         let addButton (parent: Panel) title run =
             parent.Children.Add(button title run |> VirtualDom.create)
         manager.Children.Add(TextBlock(Text = "插件管理", FontSize = 24.))
+        let devPanel = StackPanel(Spacing = 4.)
+        let devStatus = TextBlock(TextWrapping = Media.TextWrapping.Wrap)
+        let switch = CheckBox(Content = "插件开发模式", IsChecked = Nullable developer.Enabled)
+        let copy = Button(Content = "复制 MCP 连接配置")
+        let showDeveloper () =
+            copy.IsEnabled <- developer.Running
+            devStatus.Text <- if developer.Error <> "" then developer.Error elif developer.Running then "本机 MCP 服务运行中" else "本机 MCP 服务已关闭"
+        switch.IsCheckedChanged.Add(fun _ ->
+            try
+                developer.SetEnabled(switch.IsChecked = Nullable true)
+                showDeveloper()
+            with e -> devStatus.Text <- e.Message)
+        copy.Click.Add(fun _ ->
+            task {
+                try
+                    do! window.Clipboard.SetTextAsync(developer.Configuration)
+                    devStatus.Text <- "已复制本机 MCP 连接配置"
+                with e -> devStatus.Text <- e.Message
+            } |> ignore)
+        showDeveloper()
+        for c in [switch :> Control; copy; devStatus] do devPanel.Children.Add c
+        manager.Children.Add devPanel
         let tools = WrapPanel()
         addButton tools "关联开发目录…" (fun () ->
             task {
@@ -584,6 +608,7 @@ type MainWindow() as window =
                     feedback.Text <- $"布局未能保存 · {ex.Message}"
                     eprintfn "%s" feedback.Text)
         window.Closed.Add(fun _ ->
+            (developer :> IDisposable).Dispose()
             monitorState.Stop()
             workspace.Close()
             cache.Clear()
