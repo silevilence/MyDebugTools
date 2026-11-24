@@ -22,6 +22,18 @@ let ``install is repeatable and survives reopening the catalog`` () =
         catalog.Install preview
         Assert.Single(host.Plugins) |> ignore
         Assert.True(host.Enabled preview.Manifest.Id)
+        let replacement = Path.Combine(temp.FullName, "new.zip")
+        Reload.buildThirdParty build "A" "2"
+        ZipFile.CreateFromDirectory(build, replacement)
+        let updated = PluginPackage.preview replacement
+        catalog.Replace(updated, ignore)
+        Assert.Equal(updated.Hash, (catalog.Package preview.Manifest.Id).Value.Hash)
+        let invalid = Path.Combine(temp.FullName, "invalid.zip")
+        File.WriteAllText(Path.Combine(build, updated.Manifest.Assembly), "invalid")
+        ZipFile.CreateFromDirectory(build, invalid)
+        Assert.ThrowsAny<Exception>(fun () -> catalog.Replace(PluginPackage.preview invalid, ignore)) |> ignore
+        Assert.True(host.Enabled preview.Manifest.Id)
+        Assert.Equal(updated.Hash, (catalog.Package preview.Manifest.Id).Value.Hash)
         use restored = new Host()
         let reopened = LocalPlugins(restored, settings)
         Assert.Empty(reopened.Restore())

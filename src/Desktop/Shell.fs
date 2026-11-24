@@ -315,14 +315,25 @@ type MainWindow() as window =
                             let content = StackPanel(Spacing = 8., Margin = Thickness 16.)
                             content.Children.Add(TextBlock(Text = $"{m.Title} · {m.Id} · 版本 {version}\\n{preview.Source}\\n已有同 ID 插件 · {prior}", TextWrapping = Media.TextWrapping.Wrap))
                             addButton content "取消" (fun () -> dialog.Close(false))
-                            addButton content "加载并启用" (fun () -> dialog.Close(true))
+                            addButton content (if (catalog.Package m.Id).IsSome then "替换并启用" else "加载并启用") (fun () -> dialog.Close(true))
                             dialog.Content <- content
                             let! ok = dialog.ShowDialog<bool>(window)
                             if ok then
-                                catalog.Install preview
-                                filter.Text <- m.Id
-                                feedback.Text <- $"已启用 · {m.Title}"
-                                refresh()
+                                let! proceed = task {
+                                    match host.Monitor m.Id with
+                                    | Some session when (session.Target()).IsSome ->
+                                        let! ok = confirmStop (session.Target() |> Option.defaultValue "") "替换"
+                                        if ok then do! session.Stop()
+                                        return ok
+                                    | _ -> return true
+                                }
+                                if proceed then
+                                    try
+                                        if (catalog.Package m.Id).IsSome then catalog.Replace(preview, refresh)
+                                        else catalog.Install preview
+                                        filter.Text <- m.Id
+                                        feedback.Text <- $"已启用 · {m.Title}"
+                                    finally refresh()
                 with e ->
                     feedback.Text <- $"加载插件包失败。请检查 ZIP 和入口程序集。{e.GetBaseException().Message}"
                     managerDiagnostic.Show("插件管理", "加载插件包", "本地 ZIP", e.GetBaseException().Message)

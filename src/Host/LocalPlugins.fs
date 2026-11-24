@@ -157,6 +157,41 @@ type LocalPlugins(host: Host, settingsFile: string) =
     member _.Package id =
         match packages.TryGetValue id with true, item -> Some item | _ -> None
 
+    member _.Replace(preview: PackagePreview, detached: unit -> unit) =
+        use guard = lockCatalog()
+        let items = readPackages()
+        let id = preview.Manifest.Id
+        let old = packages[id]
+        if not (items |> Array.contains old) then invalidOp "安装记录已变化，请重新打开管理页。"
+        let previousFolder = packageFolder old
+        let previousManifest = manifests[id]
+        let enabled = host.Enabled id
+        let updated = { old with Hash = preview.Hash; Folder = Guid.NewGuid().ToString("N"); Source = preview.Source }
+        let folder = packageFolder updated
+        Directory.CreateDirectory folder |> ignore
+        let mutable removed = false
+        let mutable attached = false
+        try
+            PluginPackage.extract preview folder
+            host.Remove id
+            removed <- true
+            detached()
+            locations.Remove id |> ignore
+            attach folder preview.Manifest
+            attached <- true
+            host.Enable id
+            savePackages (items |> Array.map (fun item -> if item.Id = id then updated else item))
+            packages[id] <- updated
+        with _ ->
+            if attached then host.Remove id
+            if removed then
+                locations.Remove id |> ignore
+                attach previousFolder previousManifest
+                if enabled then host.Enable id
+            Directory.Delete(folder, true)
+            reraise()
+        Directory.Delete(previousFolder, true)
+
     member this.Install(preview: PackagePreview) =
         use guard = lockCatalog()
         let items = readPackages()

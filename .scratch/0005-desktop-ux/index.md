@@ -38,7 +38,7 @@ Status: ready-for-agent
 | [0005-03 用表格管理全部插件](issues/03-plugin-table.md) | 无 | 已实施，待统一验收 |
 | [0005-04 按界面展开插件关系](issues/04-plugin-relations.md) | 03 | 已实施，待统一验收 |
 | [0005-05 从 ZIP 加载外部插件](issues/05-load-plugin-zip.md) | 03 | 已实施，待统一验收 |
-| [0005-06 更换外部插件版本](issues/06-replace-plugin-zip.md) | 05 | 待开始 |
+| [0005-06 更换外部插件版本](issues/06-replace-plugin-zip.md) | 05 | 已实施，待统一验收 |
 | [0005-07 卸载外部包与解除目录关联](issues/07-remove-external-plugin.md) | 05 | 待开始 |
 | [0005-08 停靠、浮动与找回真实插件面板](issues/08-dock-plugin-panels.md) | 无 | 待开始 |
 | [0005-09 保存并恢复工作区布局](issues/09-restore-dock-layout.md) | 08 | 待开始 |
