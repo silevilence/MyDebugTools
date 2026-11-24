@@ -18,10 +18,27 @@ type Editor() =
     let layouts = input "结构体，每行一项。例：Point pack=8 x:i32 y:i32。指针类型写作 Point* 或 i32*。" true
     let sources = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
     let mutable original = Signature.Unknown ""
-    do panel.Children.Add sources
+    let changed = Event<unit>()
+    let mutable loading = false
+    do
+        panel.Children.Add sources
+        for field in [result; convention; parameters; layouts] do
+            field.PropertyChanged.Add(fun e ->
+                if e.Property = TextBox.TextProperty && not loading then changed.Trigger())
+    member _.Changed = changed.Publish
+    member _.Snapshot = original, result.Text, convention.Text, parameters.Text, layouts.Text
+    member this.Restore(s, r, c, p, l) =
+        this.Load(s)
+        loading <- true
+        result.Text <- r
+        convention.Text <- c
+        parameters.Text <- p
+        layouts.Text <- l
+        loading <- false
     member _.Panel = panel
     member _.Entry = original.Entry
     member _.Load(s: Signature) =
+        loading <- true
         original <- s
         result.Text <- s.Result
         convention.Text <- s.Convention
@@ -35,6 +52,7 @@ type Editor() =
             s.Values() |> Seq.map (fun field ->
                 let origin = match s.Sources.TryGetValue field.Key with true, v -> v | _ -> "待补齐"
                 $"{field.Key} · {origin}") |> String.concat "　"
+        loading <- false
     member _.Read(entry) =
         let s = Signature(entry, result.Text.Trim(), convention.Text.Trim(), SignatureText.Parameters parameters.Text,
                           SignatureText.Layouts layouts.Text, Collections.Generic.Dictionary())

@@ -39,6 +39,17 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                     let path = TextBox(PlaceholderText = "DLL 文件路径")
                     let status = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
                     let exports = ListBox(Height = 160.)
+                    let filter = TextBox(PlaceholderText = "按名称或序号查找")
+                    AutomationProperties.SetName(filter, "筛选导出")
+                    let cells (values: string list) =
+                        let grid = Grid(ColumnDefinitions = ColumnDefinitions("2*,*,*,*"), ColumnSpacing = 8.)
+                        values |> List.iteri (fun i value ->
+                            let label = TextBlock(Text = value)
+                            Grid.SetColumn(label, i)
+                            grid.Children.Add label)
+                        grid
+                    exports.ItemTemplate <- Templates.FuncDataTemplate<Export>(fun e _ ->
+                        cells [e.Entry; string e.Ordinal; $"0x{e.Rva:X8}"; e.Kind] :> Control)
                     AutomationProperties.SetName(path, "DLL 文件路径")
                     let mutable image: DllImage option = None
                     let editor = SignatureEditor.Editor()
@@ -50,16 +61,40 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                     AutomationProperties.SetName(arguments, "调用参数")
                     let bindings = BindingPanel.Panel(window.Clipboard, window.StorageProvider, (fun () -> image),
                                                       (fun () -> editor.Read entry.Text), (fun () -> arguments.Text), store)
+                    let drafts = Collections.Generic.Dictionary<string * string, _>()
+                    let mutable activeKey = None
+                    let mutable dirty = false
+                    editor.Changed.Add(fun () ->
+                        dirty <- true
+                        signatureStatus.Text <- "已修改 · 待确认")
+                    let remember () =
+                        if dirty then activeKey |> Option.iter (fun key -> drafts[key] <- editor.Snapshot)
                     let selectEntry () =
                         match image with
                         | None -> ()
                         | Some dll ->
                             try
-                                let found = store.Find(dll, entry.Text)
-                                editor.Load found.Signature
-                                signatureStatus.Text <- found.Status
+                                remember()
+                                let key = dll.Identity, string entry.Text
+                                activeKey <- Some key
+                                match drafts.TryGetValue key with
+                                | true, snapshot ->
+                                    editor.Restore snapshot
+                                    dirty <- true
+                                    signatureStatus.Text <- "已修改 · 待确认"
+                                | _ ->
+                                    let found = store.Find(dll, entry.Text)
+                                    editor.Load found.Signature
+                                    dirty <- false
+                                    signatureStatus.Text <- found.Status
                             with e -> signatureStatus.Text <- e.Message
-                    entry.TextChanged.Add(fun _ -> if editor.Entry <> entry.Text then selectEntry())
+                    entry.PropertyChanged.Add(fun e ->
+                        if e.Property = TextBox.TextProperty && editor.Entry <> entry.Text then selectEntry())
+                    filter.TextChanged.Add(fun _ ->
+                        image |> Option.iter (fun dll ->
+                            let query = string filter.Text
+                            exports.ItemsSource <- dll.Exports |> Seq.filter (fun e ->
+                                e.Entry.Contains(query, StringComparison.OrdinalIgnoreCase) || ("#" + string e.Ordinal).Contains(query)) |> Seq.toArray))
                     exports.SelectionChanged.Add(fun _ ->
                         match exports.SelectedItem with
                         | :? Export as item -> entry.Text <- item.Entry
@@ -67,10 +102,15 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                     let openFile file =
                         try
                             let loaded = DllImage.Open file
+                            remember()
+                            activeKey <- None
+                            dirty <- false
                             restart()
                             image <- Some loaded
                             bindings.Open loaded
                             path.Text <- loaded.Path
+                            filter.Text <- ""
+                            panel.IsVisible <- true
                             exports.ItemsSource <- loaded.Exports
                             entry.Text <- ""
                             editor.Load(Signature.Unknown "")
@@ -83,7 +123,7 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                             for _, _, view in mounted do view.OpenFile loaded.Path
                         with e ->
                             let active = image |> Option.map _.Path |> Option.defaultValue "无"
-                            status.Text <- $"打开失败 · {e.Message}　当前 DLL · {active}"
+                            status.Text <- $"打开 {file} 失败 · {e.Message}　当前 DLL · {active}"
                     header.Children.Add(TextBlock(Text = "DLL 工作台", FontSize = 24.))
                     header.Children.Add path
                     header.Children.Add(row [
@@ -95,7 +135,10 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                             } |> ignore)
                     ])
                     header.Children.Add status
-                    panel.Children.Add(TextBlock(Text = "导出名　序号　相对地址　性质"))
+                    panel.IsVisible <- false
+                    panel.Children.Add(TextBlock(Text = "筛选导出"))
+                    panel.Children.Add filter
+                    panel.Children.Add(cells ["导出名"; "序号"; "相对地址"; "性质"])
                     panel.Children.Add exports
                     panel.Children.Add(TextBlock(Text = "仅有导出表时，返回类型和参数未知。"))
                     panel.Children.Add entry
@@ -105,8 +148,9 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                     panel.Children.Add(button "识别 C 声明" (fun () ->
                         try
                             let parsed = CDeclaration.Parse(declaration.Text, entry.Text)
-                            editor.Load parsed.Signature
                             entry.Text <- parsed.Signature.Entry
+                            editor.Load parsed.Signature
+                            dirty <- true
                             signatureStatus.Text <- String.concat "　" (Array.append [| "来自 C 声明 · 待确认" |] parsed.Notes)
                         with e -> signatureStatus.Text <- e.Message))
                     panel.Children.Add editor.Panel
@@ -115,6 +159,8 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                             let dll = image |> Option.defaultWith (fun () -> invalidOp "请先打开 DLL。")
                             let s = editor.Read(entry.Text)
                             store.Confirm(dll, s)
+                            dirty <- false
+                            drafts.Remove((dll.Identity, entry.Text)) |> ignore
                             selectEntry()
                         with e -> signatureStatus.Text <- e.Message))
                     panel.Children.Add signatureStatus
