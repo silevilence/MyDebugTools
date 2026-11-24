@@ -1,4 +1,4 @@
-import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -20,6 +20,14 @@ class ReleaseTests(unittest.TestCase):
         for text in ("## V0.0.10\n十", "## V0.0.1\n\n", "## V0.0.1\na\n## v0.0.1\nb"):
             with self.assertRaises(ValueError):
                 release.release_notes(text, "0.0.1")
+
+    def test_rejects_wrong_project_version_before_accessing_release(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {
+            "GITHUB_REF_TYPE": "tag", "GITHUB_REF_NAME": "V2.0.0",
+            "GITHUB_OUTPUT": str(Path(folder) / "outputs"),
+        }), patch.object(sys, "argv", ["tag_release.py", "prepare"]), patch.object(release, "run", return_value="1.0.0"):
+            with self.assertRaisesRegex(ValueError, "1.0.0.*V2.0.0"):
+                release.main()
 
     def test_resume_and_verify_public_assets(self):
         tag, commit, notes, version = "v0.0.1", "abc", "本版说明", "0.0.1"

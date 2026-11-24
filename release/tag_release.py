@@ -34,7 +34,8 @@ def release_notes(markdown, version):
             continue
         if current is not None:
             current.append(line)
-    if len(sections) != 1 or not (body := "\n".join(sections[0]).strip()):
+    body = "\n".join(sections[0]).strip("\n") if len(sections) == 1 else ""
+    if not body.strip():
         raise ValueError(f"changelog.md 需要唯一且非空的 {version} 二级标题，匹配 {len(sections)} 节")
     return body
 
@@ -66,7 +67,7 @@ def records(assets):
 
 
 def check_public(item, tag, commit, notes, version):
-    if item["body"].replace("\r\n", "\n").strip() != notes or item["prerelease"]:
+    if item["body"].replace("\r\n", "\n").strip("\n") != notes or item["prerelease"]:
         raise ValueError(f"{tag} 已公开，发布说明或正式版状态冲突")
     receipt_asset = next((a for a in item["assets"] if a["name"] == RECEIPT), None)
     if not receipt_asset:
@@ -95,7 +96,7 @@ def publish(tag, commit, notes, version, items, draft):
            "--title", tag, "--notes-file", OUTPUT / "notes.md")
         existing = {}
     else:
-        if draft["target_commitish"] != commit or draft["body"].replace("\r\n", "\n").strip() != notes:
+        if draft["target_commitish"] != commit or draft["body"].replace("\r\n", "\n").strip("\n") != notes:
             raise ValueError(f"{tag} 草稿提交或正文冲突")
         existing = records(draft["assets"])
         if existing.keys() - files.keys():
@@ -106,6 +107,9 @@ def publish(tag, commit, notes, version, items, draft):
     state = next(i for i in releases() if i["tag_name"] == tag)
     if not state["draft"] or records(state["assets"]) != manifest:
         raise ValueError(f"{tag} 草稿资产不完整或摘要不匹配")
+    print(f"{tag} · {commit}", flush=True)
+    for name, asset in manifest.items():
+        print(f"{name} · {asset['size']} bytes · {asset['digest']}", flush=True)
     newer = any(not i["draft"] and not i["prerelease"] and (m := TAG.fullmatch(i["tag_name"]))
                 and tuple(map(int, m[1].split("."))) > tuple(map(int, version.split("."))) for i in items)
     gh("release", "edit", tag, "--draft=false", "--latest=" + str(not newer).lower())
