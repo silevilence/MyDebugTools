@@ -41,12 +41,12 @@ type DiagnosticPanel() =
                 try
                     do! (TopLevel.GetTopLevel(body)).Clipboard.SetTextAsync(current)
                     if current = report then receipt.Text <- "已复制诊断信息"
-                with _ ->
+                with e ->
                     if current = report then
                         detail.IsExpanded <- true
                         text.Focus() |> ignore
                         text.SelectAll()
-                        receipt.Text <- "剪贴板不可写。可手动复制已选中的摘要。"
+                        receipt.Text <- $"剪贴板不可写。可手动复制已选中的摘要。{e.Message}"
             } |> ignore)
     member _.Control = body
     member _.Clear() = body.IsVisible <- false

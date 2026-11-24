@@ -261,7 +261,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
                   [for e in Option.ofObj m.Extensions |> Option.defaultValue [||] do
                       if not (isNull (box e)) && not (String.IsNullOrWhiteSpace e.PageId) then yield e.PageId, e.Title])
         | _ -> None
-    member _.TitleAt(path) = (manifest path).Title
+
 
     member _.AddDirectory(path) =
         let folder = DirectoryInfo(path).FullName

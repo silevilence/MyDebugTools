@@ -54,14 +54,14 @@ let project (analysis: DependencyAnalysis) =
 let private width, height = 164., 34.
 let private origin node = Point(20. + 220. * float node.Column, 24. + 64. * float node.Row)
 
-let private drawLinks (nodes: Node array) (pairs: Link array) active (context: DrawingContext) =
+let private drawLinks (nodes: Node array) (pairs: Link array) active (normal: IBrush) (accent: IBrush) (context: DrawingContext) =
     let draw (edge: Link) =
         let fromNode, toNode = nodes[edge.Source], nodes[edge.Destination]
         let a, b = origin fromNode, origin toNode
         let start = Point(a.X + width, a.Y + height / 2.)
         let finish = Point(b.X, b.Y + height / 2.)
         let selected = edge.Source = active || edge.Destination = active
-        let pen = Pen((if selected then Brushes.SteelBlue else Brushes.Gray), (if selected then 2. else 1.))
+        let pen = Pen((if selected then accent else normal), (if selected then 2. else 1.))
         let route =
             if toNode.Column = fromNode.Column + 1 then
                 [| start; Point(start.X + 8., start.Y); Point(finish.X - 12., finish.Y); finish |]
@@ -84,7 +84,12 @@ let create (subscriptions: Subscriptions.Group) analysis picked =
                         Height = (nodes |> Array.maxBy _.Row |> origin).Y + height + 20.)
     let pairs = links |> Array.distinctBy (fun edge -> edge.Source, edge.Destination)
     let mutable active = 0
-    let lines = new MyDebugTools.Contracts.DrawingSurface((fun ctx -> drawLinks nodes pairs active ctx),
+    let brush key fallback =
+        match canvas.TryFindResource(key, canvas.ActualThemeVariant) with
+        | true, (:? IBrush as value) -> value
+        | _ -> fallback
+    let lines = new MyDebugTools.Contracts.DrawingSurface((fun ctx ->
+                          drawLinks nodes pairs active (brush "TextControlForeground" Brushes.Gray) (brush "SystemControlHighlightAccentBrush" Brushes.DodgerBlue) ctx),
                                                            Width = canvas.Width, Height = canvas.Height)
     subscriptions.Add lines
     canvas.Children.Add lines

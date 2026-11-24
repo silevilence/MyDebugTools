@@ -44,6 +44,7 @@ type Definitions(events: Events, capture: unit -> Definition, apply: Definition 
     let run action () = try action() with e -> report e.Message
     let save () =
         let d = { capture() with Id = id; Title = (value title).Trim(); Folder = (value folder).Trim() }
+        if d.Parameters |> Array.exists (fun p -> System.String.IsNullOrWhiteSpace p.Name) then invalidOp "请填写参数名或移除空行"
         let result = Library.save dir d
         id <- result.Id
         assignSource result

@@ -22,7 +22,7 @@ module private View =
         control
 
     let create (target: unit -> DebugTarget option) () =
-        let panel = StackPanel(Spacing = 8.)
+        let layout = DockPanel()
         let query = input "搜索 SDK 函数"
         let dll = input "监控 DLL 路径"
         let store = SignatureStore(IO.Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "signatures"))
@@ -92,6 +92,18 @@ module private View =
         let exe = input "目标 EXE 路径"
         let args = input "程序参数"
         let history = ComboBox()
+        let mutable sessions: CaptureSession array = [||]
+        let mutable names: string array = [||]
+        let selectedSession () = sessions |> Array.tryItem history.SelectedIndex
+        let updateHistory () =
+            let known = CaptureHistory.Sessions()
+            let labels = known |> Array.map string
+            if labels <> names then
+                let index = history.SelectedIndex
+                sessions <- known
+                names <- labels
+                history.ItemsSource <- labels
+                history.SelectedIndex <- if index >= 0 && index < labels.Length then index else labels.Length - 1
         let calls = ListBox(Height = 160.)
         let detail = TextBlock(TextWrapping = TextWrapping.Wrap)
         let state = TextBlock(TextWrapping = TextWrapping.Wrap)
@@ -102,12 +114,13 @@ module private View =
         let matches = TextBlock()
         let displayed = Collections.ObjectModel.ObservableCollection<CapturedCall>()
         calls.ItemsSource <- displayed
+        let timeline = TabControl()
         let mutable lastView = None
         let showDetail () =
             detail.Text <- match calls.SelectedItem with :? CapturedCall as c -> c.Details | _ -> ""
         let refresh () =
-            match history.SelectedItem with
-            | :? CaptureSession as s when lastView <> Some (s, s.Revision) ->
+            match selectedSession() with
+            | Some s when lastView <> Some (s, s.Revision) ->
                 lastView <- Some (s, s.Revision)
                 let old = match calls.SelectedItem with :? CapturedCall as c -> Some c.Id | _ -> None
                 let rows = s.Records()
@@ -136,8 +149,9 @@ module private View =
             try
                 let s = beginCapture()
                 CaptureHistory.Add s
-                history.ItemsSource <- CaptureHistory.Sessions()
-                history.SelectedItem <- s
+                updateHistory()
+                timeline.SelectedIndex <- 1
+                history.SelectedIndex <- sessions |> Array.findIndex ((=) s)
                 message.Text <- ""
             with e ->
                 message.Text <- e.Message + "。请核对目标后重试。"
@@ -149,12 +163,12 @@ module private View =
         let mode = ComboBox(ItemsSource = [|"启动程序"; "附加进程"|], SelectedIndex = 0)
         AutomationProperties.SetName(mode, "监控目标模式")
         let mutable previousTarget = None
-        panel.AttachedToVisualTree.Add(fun _ ->
+        layout.AttachedToVisualTree.Add(fun _ ->
             let currentTarget = target()
             if currentTarget <> previousTarget then
                 previousTarget <- currentTarget
                 match currentTarget |> Option.map _.Source with
-                | Some (ProcessId id) -> mode.SelectedIndex <- 1; pid.Text <- string id
+                | Some (ProcessId id) -> timeline.SelectedIndex <- 0; mode.SelectedIndex <- 1; pid.Text <- string id
                 | _ -> ())
         let attach = button "附加并监控" (fun () -> track "附加采集" ("PID " + string pid.Text) (fun () ->
             let id =
@@ -163,8 +177,8 @@ module private View =
                 | _ -> invalidOp "请输入大于 0 的进程 ID。"
             CaptureSession.Attach(id, architecture (Targets.forProcess id), selected)))
         let stop = button "停止所选会话" (fun () ->
-            match history.SelectedItem with
-            | :? CaptureSession as s -> s.StopAsync() |> ignore
+            match selectedSession() with
+            | Some s -> s.StopAsync() |> ignore
             | _ -> ())
         let prepare () =
             let launching = mode.SelectedIndex = 0
@@ -172,24 +186,37 @@ module private View =
             for c in [pid :> Control; attach] do c.IsVisible <- not launching
             start.IsEnabled <- selected.Count > 0 && not (String.IsNullOrWhiteSpace exe.Text)
             attach.IsEnabled <- selected.Count > 0 && not (String.IsNullOrWhiteSpace pid.Text)
-            stop.IsEnabled <- match history.SelectedItem with :? CaptureSession as s -> not s.Completion.IsCompleted | _ -> false
+            stop.IsEnabled <- match selectedSession() with Some s -> not s.Completion.IsCompleted | _ -> false
         mode.SelectionChanged.Add(fun _ -> prepare())
         exe.TextChanged.Add(fun _ -> prepare())
         pid.TextChanged.Add(fun _ -> prepare())
         selectionChanged.Publish.Add(fun () -> prepare())
         prepare()
-        history.ItemsSource <- CaptureHistory.Sessions()
-        history.SelectedIndex <- history.ItemCount - 1
+        updateHistory()
         let timer = DispatcherTimer(Interval = TimeSpan.FromMilliseconds 400.)
-        timer.Tick.Add(fun _ -> refresh(); prepare())
-        panel.AttachedToVisualTree.Add(fun _ -> timer.Start())
-        panel.DetachedFromVisualTree.Add(fun _ -> timer.Stop())
-        let controls: Control list =
-            [ TextBlock(Text = "API 监控", FontSize = 24.); sourceName; sdk; dll; load; query; clear; results; details; add
-              count; chosen; remove; TextBlock(Text = "选择目标"); mode; exe; args; start; pid; attach; message; diagnosis.Control
-              TextBlock(Text = "采集会话"); history; stop; state; functionFilter; threadFilter; clearRecords; matches; calls; detail ]
-        controls |> List.iter panel.Children.Add
-        ScrollViewer(Content = panel) :> Control
+        timer.Tick.Add(fun _ -> updateHistory(); refresh(); prepare())
+        let setup = StackPanel(Spacing = 8.)
+        let inputs: Control list = [sourceName; sdk; dll; load; query; clear; results; details; add; count; chosen; remove
+                                    TextBlock(Text = "选择目标"); mode; exe; args; start; pid; attach; message; diagnosis.Control]
+        for control in inputs do setup.Children.Add control
+        let recording = DockPanel()
+        let top = StackPanel(Spacing = 4.)
+        for control in [history :> Control; state; stop; matches] do top.Children.Add control
+        DockPanel.SetDock(top, Dock.Top)
+        recording.Children.Add top
+        let body = StackPanel(Spacing = 6.)
+        for control in [functionFilter :> Control; threadFilter; clearRecords; calls; detail] do body.Children.Add control
+        recording.Children.Add(ScrollViewer(Content = body))
+        timeline.Items.Add(TabItem(Header = "准备监控", Content = ScrollViewer(Content = setup))) |> ignore
+        timeline.Items.Add(TabItem(Header = "会话记录", Content = recording)) |> ignore
+        timeline.SelectedIndex <- if sessions.Length = 0 then 0 else 1
+        let title = TextBlock(Text = "API 监控", FontSize = 24.)
+        DockPanel.SetDock(title, Dock.Top)
+        layout.Children.Add title
+        layout.Children.Add timeline
+        layout.AttachedToVisualTree.Add(fun _ -> timer.Start())
+        layout.DetachedFromVisualTree.Add(fun _ -> timer.Stop())
+        layout :> Control
 
 type Plugin() =
     interface IDesktopPlugin with

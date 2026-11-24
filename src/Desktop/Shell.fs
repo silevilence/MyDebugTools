@@ -106,12 +106,15 @@ let private targets (window: Window) (host: Host) openTask () =
         } |> ignore)
     panel.Children.Add(TextBlock(Text = "进程 ID"))
     panel.Children.Add pid
-    addButton "选择目标进程" (fun () ->
+    let selectProcess () =
         show "选择进程" ("PID " + string pid.Text) (fun () ->
             if String.IsNullOrWhiteSpace pid.Text then invalidOp "请输入大于 0 的进程 ID。"
             match Int32.TryParse pid.Text with
             | true, id when id > 0 -> ProcessId id
-            | _ -> invalidOp "进程 ID 须为大于 0 的整数。请修改后重试。"))
+            | _ -> invalidOp "进程 ID 须为大于 0 的整数。请修改后重试。")
+    addButton "选择目标进程" selectProcess
+    pid.KeyDown.Add(fun e ->
+        if e.Key = Input.Key.Enter then selectProcess(); e.Handled <- true)
     panel.Children.Add feedback
     panel.Children.Add diagnostics.Control
     ScrollViewer(Content = panel) :> Control
@@ -134,6 +137,7 @@ type MainWindow() as window =
     let workspace = Workspace(window)
     let pageArea = workspace.Control
     let views = ShellMenuItem("视图")
+    let toolMenu = ShellMenuItem("工具")
     let manager = StackPanel(Spacing = 12.)
     let feedback = TextBlock(TextWrapping = Media.TextWrapping.Wrap)
     let managerDiagnostic = DiagnosticPanel()
@@ -162,7 +166,7 @@ type MainWindow() as window =
         return! dialog.ShowDialog<bool>(window)
     }
 
-    let rec navigate id =
+    let updateNavigation id =
         current <- id
         clearMenu actionsMenu actionHandlers
         actionResult.Text <- ""
@@ -177,8 +181,11 @@ type MainWindow() as window =
                     with e -> actionResult.Text <- e.Message))
                 group.Items.Add item |> ignore
             actionsMenu.Items.Add group |> ignore
-        for item in menu.Items |> Seq.cast<MenuItem> do
+        for item in Seq.append (menu.Items |> Seq.cast<MenuItem>) (toolMenu.Items |> Seq.cast<MenuItem>) do
             item.FontWeight <- if unbox<string> item.Tag = id then Media.FontWeight.Bold else Media.FontWeight.Normal
+
+    let rec navigate id =
+        updateNavigation id
         let page = host.Pages |> List.find (fun p -> p.Id = id)
         match cache.TryGetValue id with
         | true, control -> workspace.Show(id, page.Title, control)
@@ -245,7 +252,7 @@ type MainWindow() as window =
     and addDirectory path =
         try
             catalog.AddDirectory path
-            filter.Text <- catalog.TitleAt path
+            filter.Text <- host.Plugins |> List.find (fun p -> catalog.Directory p.Id = Some(Path.GetFullPath path)) |> _.Title
             managerDiagnostic.Clear()
             folderInput.Text <- ""
             feedback.Text <- ""
@@ -261,12 +268,16 @@ type MainWindow() as window =
                 workspace.Remove id
                 cache.Remove id |> ignore
         clearMenu menu navigationHandlers
+        toolMenu.Items.Clear()
+        let compact = window.ClientSize.Width < 760. || pages.Length > 7
         for page in pages do
             let item = ShellMenuItem(page.Title)
             let pageId = page.Id
             item.Tag <- pageId
             navigationHandlers.Add(item.Click.Subscribe(fun _ -> navigate pageId))
-            menu.Items.Add item |> ignore
+            if compact && not (page.Id.StartsWith("core.")) then toolMenu.Items.Add item |> ignore
+            else menu.Items.Add item |> ignore
+        if toolMenu.Items.Count > 0 then menu.Items.Add toolMenu |> ignore
         views.Items.Clear()
         for page in pages do
             let item = ShellMenuItem(page.Title, ToggleType = MenuItemToggleType.CheckBox, IsChecked = workspace.IsOpen page.Id)
@@ -292,6 +303,7 @@ type MainWindow() as window =
                 let missing = plugins |> List.filter (host.Enabled >> not)
                 let caption = if missing.IsEmpty then $"打开{label}" else $"启用并打开{label}"
                 let b = Button(Content = caption, Margin = Thickness(0., 0., 8., 0.))
+                if label <> "依赖" then b.Classes.Add("accent")
                 b.Click.Add(fun _ -> openTask plugins page tab None)
                 commands.Children.Add b
             home.Children.Add commands
@@ -334,7 +346,7 @@ type MainWindow() as window =
                             let dialog = Window(Title = "插件包预览", Width = 460., SizeToContent = SizeToContent.Height,
                                                 WindowStartupLocation = WindowStartupLocation.CenterOwner)
                             let content = StackPanel(Spacing = 8., Margin = Thickness 16.)
-                            content.Children.Add(TextBlock(Text = $"{m.Title} · {m.Id} · 版本 {version}\\n{preview.Source}\\n已有同 ID 插件 · {prior}", TextWrapping = Media.TextWrapping.Wrap))
+                            content.Children.Add(TextBlock(Text = $"{m.Title} · {m.Id} · 版本 {version}\n{preview.Source}\n已有同 ID 插件 · {prior}", TextWrapping = Media.TextWrapping.Wrap))
                             addButton content "取消" (fun () -> dialog.Close(false))
                             addButton content (if (catalog.Package m.Id).IsSome then "替换并启用" else "加载并启用") (fun () -> dialog.Close(true))
                             dialog.Content <- content
@@ -374,6 +386,10 @@ type MainWindow() as window =
         manager.Children.Add flat
         manager.Children.Add rows
         renderRows()
+        let destination = current
+        for page in pages do
+            if not (cache.ContainsKey page.Id) && workspace.NeedsMount page.Id then navigate page.Id
+        current <- destination
         navigate (if pages |> List.exists (fun p -> p.Id = current) then current else "core.manager")
 
     and renderRows () =
@@ -452,7 +468,7 @@ type MainWindow() as window =
                                 let body = StackPanel(Spacing = 8., Margin = Thickness 16.)
                                 let scope = if package.IsSome then "清理受管副本" else "保留编译目录"
                                 let affected = List.append pages (List.map snd targets) |> String.concat "、"
-                                body.Children.Add(TextBlock(Text = $"{plugin.Title} · {plugin.Id}\\n界面与扩展 · {affected}\\n{scope} · {path}", TextWrapping = Media.TextWrapping.Wrap))
+                                body.Children.Add(TextBlock(Text = $"{plugin.Title} · {plugin.Id}\n界面与扩展 · {affected}\n{scope} · {path}", TextWrapping = Media.TextWrapping.Wrap))
                                 addAction body "取消" (fun () -> dialog.Close(false))
                                 addAction body ("确认" + verb) (fun () -> dialog.Close(true))
                                 dialog.Content <- body
@@ -468,6 +484,7 @@ type MainWindow() as window =
                                     }
                                     if proceed then
                                         catalog.RemoveExternal(plugin.Id, refresh)
+                                        for page in pages do workspace.Forget page
                                         filter.Text <- ""
                                         feedback.Text <- $"已{verb} · {plugin.Title}"
                             with e ->
@@ -489,10 +506,7 @@ type MainWindow() as window =
                 Create = fun () -> { new IDesktopPlugin with member _.Activate reg = reg.Page page }
             }
         workspace.Focused.Add(fun id ->
-            if current <> id then
-                current <- id
-                Avalonia.Threading.Dispatcher.UIThread.Post(fun () ->
-                    if current = id && workspace.IsOpen id then navigate id))
+            if current <> id && (host.Pages |> List.exists (fun p -> p.Id = id)) then updateNavigation id)
         views.SubmenuOpened.Add(fun _ ->
             for page, item in Seq.zip host.Pages (views.Items |> Seq.cast<MenuItem>) do item.IsChecked <- workspace.IsOpen page.Id)
         pageArea.Focusable <- true
@@ -532,13 +546,21 @@ type MainWindow() as window =
         layout.Children.Add capture
         layout.Children.Add pageArea
         window.Content <- layout
+        window.KeyDown.Add(fun e ->
+            if e.Key = Input.Key.Home && e.KeyModifiers = Input.KeyModifiers.Alt then
+                navigate "core.home"
+                home.Children |> Seq.tryPick (function :? WrapPanel as p when p.Children.Count > 0 -> Some p.Children[0] | _ -> None)
+                |> Option.iter (fun c -> c.Focus() |> ignore)
+                e.Handled <- true)
         window.Closing.Add(fun e ->
             if not manager.IsEnabled then
                 e.Cancel <- true
                 closeAfterChange <- true
             elif not e.Cancel then
                 try workspace.Save([|for p in host.Plugins do if not p.Core && host.Enabled p.Id then yield p.Id|], current)
-                with ex -> feedback.Text <- $"布局未能保存 · {ex.Message}")
+                with ex ->
+                    feedback.Text <- $"布局未能保存 · {ex.Message}"
+                    eprintfn "%s" feedback.Text)
         window.Closed.Add(fun _ ->
             monitorState.Stop()
             for id in cache.Keys do workspace.Remove id
@@ -547,11 +569,12 @@ type MainWindow() as window =
             clearMenu actionsMenu actionHandlers
             (host :> IDisposable).Dispose()
             catalog.CheckUnloads() |> ignore)
+        AutomationProperties.SetName(folderInput, "本地插件编译目录")
         AutomationProperties.SetName(filter, "查找插件")
         flat.IsCheckedChanged.Add(fun _ -> renderRows())
         filter.TextChanged.Add(fun _ -> renderRows())
         window.SizeChanged.Add(fun e ->
-            if (e.PreviousSize.Width >= 760.) <> (e.NewSize.Width >= 760.) then renderRows())
+            if (e.PreviousSize.Width >= 760.) <> (e.NewSize.Width >= 760.) then refresh())
         try
             let enable id =
                 if host.Plugins |> List.exists (fun p -> p.Id = id) then
@@ -560,7 +583,7 @@ type MainWindow() as window =
                 host.Pages |> List.tryFind (fun p -> p.Id = id) |> Option.map (fun page ->
                     let control = page.Create()
                     cache[id] <- control
-                    control)
+                    page.Title, control)
             current <- workspace.Restore(enable, lookup) |> Option.defaultValue current
         with e -> feedback.Text <- $"布局无法恢复，已使用默认工作区。{e.Message}"
         refresh()

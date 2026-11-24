@@ -7,6 +7,8 @@ open Avalonia.Controls
 open Avalonia.Automation
 open Avalonia.Controls.Primitives
 open Avalonia.Layout
+open Avalonia.Input.Platform
+open Avalonia.Platform.Storage
 open Avalonia.Threading
 open Avalonia.FuncUI.DSL
 open Avalonia.FuncUI.VirtualDom
@@ -24,6 +26,7 @@ module internal View =
                     else edge.Reference
                 let status = if isNull edge.Target then "未解析" else string reference
                 let item = ExpandableTreeItem($"{edge.Name} · {status}", Tag = edge)
+                AutomationProperties.SetName(item, Labels.edgeLabelAs reference edge)
                 ToolTip.SetTip(item, Labels.edgeLabelAs reference edge)
                 if reference <> DependencyReference.Cycle && not (isNull edge.Target) && edge.Target.Imports.Count > 0 then
                     // Populate a branch on its first expansion.
@@ -67,7 +70,7 @@ module internal View =
         let folders = Collections.ObjectModel.ObservableCollection<string>()
         let input = TextBox(PlaceholderText = "搜索目录路径", Width = 240.)
         AutomationProperties.SetName(input, "搜索目录路径")
-        let order = ComboBox(ItemsSource = folders, MinWidth = 180., MaxWidth = 360.)
+        let order = ListBox(ItemsSource = folders, MinHeight = 36., MaxHeight = 90.)
         AutomationProperties.SetName(order, "搜索目录顺序")
         let feedback = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap, IsVisible = false)
         let controls = WrapPanel(Orientation = Orientation.Horizontal)
@@ -76,8 +79,10 @@ module internal View =
             b.Click.Subscribe(fun _ -> run()) |> tabSubscriptions.Add
             controls.Children.Add b
             b
-        DockPanel.SetDock(header, Dock.Top)
-        layout.Children.Add header
+        let options = ScrollViewer(Content = header, MaxHeight = 215.)
+        DockPanel.SetDock(options, Dock.Top)
+        layout.Children.Add options
+        layout.SizeChanged.Subscribe(fun e -> options.MaxHeight <- max 80. (e.NewSize.Height * 0.50)) |> tabSubscriptions.Add
         let content = ContentControl(Content = TextBlock(Text = "请先在工作台打开 DLL。"))
         layout.Children.Add content
         let mutable pending: CancellationTokenSource option = None
@@ -164,7 +169,7 @@ module internal View =
             feedback.IsVisible <- false
             current |> Option.iter openFile
         controls.Children.Add input
-        button "添加搜索目录" (fun () ->
+        let addFolder () =
             try
                 let folder = IO.Path.TrimEndingDirectorySeparator(IO.Path.GetFullPath(input.Text.Trim()))
                 if not (IO.Directory.Exists folder) then invalidOp "目录不存在。"
@@ -176,8 +181,15 @@ module internal View =
                 refresh()
             with e ->
                 feedback.Text <- e.Message
-                feedback.IsVisible <- true) |> ignore
-        controls.Children.Add order
+                feedback.IsVisible <- true
+        button "添加搜索目录" addFolder |> ignore
+        button "浏览搜索目录…" (fun () ->
+            task {
+                let! picked = (TopLevel.GetTopLevel layout).StorageProvider.OpenFolderPickerAsync(FolderPickerOpenOptions(Title = "依赖搜索目录"))
+                if picked.Count > 0 then input.Text <- picked[0].TryGetLocalPath(); addFolder()
+            } |> ignore) |> ignore
+        header.Children.Add(TextBlock(Text = "自定义搜索目录（从上到下）"))
+        header.Children.Add order
         let move delta =
             let i = order.SelectedIndex
             folders.Move(i, i + delta)
@@ -203,6 +215,19 @@ module internal View =
         header.Children.Add(TextBlock(Text = "未解析导入 · 选择后定位"))
         header.Children.Add missing
         header.Children.Add chainBox
+        let copyChain = Button(Content = "复制引用链")
+        copyChain.Click.Subscribe(fun _ ->
+            task {
+                try
+                    do! (TopLevel.GetTopLevel layout).Clipboard.SetTextAsync(chainBox.Text)
+                    feedback.Text <- "已复制引用链"
+                with e ->
+                    chainBox.Focus() |> ignore
+                    chainBox.SelectAll()
+                    feedback.Text <- $"可手动复制所选引用链。{e.Message}"
+                feedback.IsVisible <- true
+            } |> ignore) |> tabSubscriptions.Add
+        header.Children.Add copyChain
         header.Children.Add diagnosis.Control
         let close () =
             let release () =

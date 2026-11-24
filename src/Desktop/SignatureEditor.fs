@@ -6,11 +6,13 @@ open MyDebugTools.DllDebugger
 
 type Editor() =
     let panel = StackPanel(Spacing = 5.)
+    let advanced = StackPanel(Spacing = 4.)
     let input label multiline =
-        panel.Children.Add(TextBlock(Text = label, TextWrapping = Avalonia.Media.TextWrapping.Wrap))
+        let parent = if multiline then advanced else panel
+        parent.Children.Add(TextBlock(Text = label, TextWrapping = Avalonia.Media.TextWrapping.Wrap))
         let box = TextBox(AcceptsReturn = multiline)
         Avalonia.Automation.AutomationProperties.SetName(box, label)
-        panel.Children.Add box
+        parent.Children.Add box
         box
     let result = input "返回类型（void、i8/u8 至 i64/u64、f32、f64、isize、usize、handle 或结构体名）" false
     let convention = input "调用约定（cdecl / stdcall / winapi）" false
@@ -20,7 +22,62 @@ type Editor() =
     let mutable original = Signature.Unknown ""
     let changed = Event<unit>()
     let mutable loading = false
+    let rows = StackPanel(Spacing = 6.)
+    let mutable editingRows = false
+    let rebuildRows () =
+        rows.Children.Clear()
+        let lineFields = ResizeArray<unit -> string>()
+        let write () =
+            if not loading then
+                editingRows <- true
+                try parameters.Text <- if lineFields.Count = 0 then "-" else lineFields |> Seq.map (fun read -> read()) |> String.concat "\n"
+                finally editingRows <- false
+        let addRow (p: Parameter) =
+            let fields = WrapPanel()
+            let field title initial =
+                let box = TextBox(Text = initial, MinWidth = 70.)
+                let col = StackPanel(Margin = Avalonia.Thickness(0., 0., 6., 4.))
+                col.Children.Add(TextBlock(Text = title))
+                col.Children.Add box
+                fields.Children.Add col
+                Avalonia.Automation.AutomationProperties.SetName(box, title)
+                box.PropertyChanged.Add(fun e -> if e.Property = TextBox.TextProperty then write())
+                box
+            let name = field "参数名" p.Name
+            let kind = field "类型" p.Type
+            let direction = field "方向" p.Direction
+            let encoding = field "编码" p.Encoding
+            let length = field "长度" (if p.Length.HasValue then string p.Length.Value else "")
+            let owner = field "所有权" p.Ownership
+            let required (box: TextBox) = if String.IsNullOrWhiteSpace box.Text then "?" else box.Text
+            let optional key (box: TextBox) = if String.IsNullOrWhiteSpace box.Text then [] else [key + "=" + box.Text]
+            let read () =
+                [ yield! [required name; required kind; required direction]
+                  yield! optional "encoding" encoding; yield! optional "length" length; yield! optional "owner" owner ] |> String.concat " "
+            lineFields.Add read
+            let remove = Button(Content = "移除此参数")
+            remove.Click.Add(fun _ ->
+                lineFields.Remove read |> ignore
+                rows.Children.Remove fields |> ignore
+                write())
+            fields.Children.Add remove
+            rows.Children.Add fields
+        try
+            let current = SignatureText.Parameters(string parameters.Text)
+            if not (isNull current) then for p in current do addRow p
+            let add = Button(Content = "添加参数行")
+            let none = Button(Content = "设为无参数")
+            let controls = WrapPanel()
+            controls.Children.Add add
+            controls.Children.Add none
+            rows.Children.Insert(0, controls)
+            add.Click.Add(fun _ -> addRow (Parameter("", "?", "in")); write())
+            none.Click.Add(fun _ -> parameters.Text <- "-")
+        with _ -> rows.Children.Add(TextBlock(Text = "请在高级文本中补全当前参数行。"))
     do
+        panel.Children.Add rows
+        panel.Children.Add(Expander(Header = "高级签名文本和结构体字段", Content = advanced))
+        parameters.PropertyChanged.Add(fun e -> if e.Property = TextBox.TextProperty && not editingRows then rebuildRows())
         panel.Children.Add sources
         for field in [result; convention; parameters; layouts] do
             field.PropertyChanged.Add(fun e ->

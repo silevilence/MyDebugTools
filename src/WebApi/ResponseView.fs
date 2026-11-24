@@ -33,8 +33,12 @@ type ResponseView(events: Events) =
             if tag = "pre" then block.FontFamily <- FontFamily("Consolas")
             preview.Children.Add block
         host.Content <- preview)
+    let selectMode (chosen: Button) =
+        for b in [original; formatted; html] do
+            if b = chosen then b.Classes.Add("accent") else b.Classes.Remove("accent") |> ignore
     let result = stack [ TextBlock(Text = "响应头"); headers; row [original; formatted; html]; message; host ]
     do
+        for b in [original; formatted; html] do events.Watch(b.Click.Subscribe(fun _ -> selectMode b))
         result.IsVisible <- false
         headers.IsReadOnly <- true
         raw.IsReadOnly <- true
@@ -43,6 +47,7 @@ type ResponseView(events: Events) =
         host.Content <- raw
     member _.Content = stack [subject; result]
     member _.Show(reply: Reply, request: string) =
+        selectMode original
         subject.Text <- $"{request} · {reply.Summary} · {reply.ElapsedMs} ms"
         result.IsVisible <- reply.Status.IsSome
         media <- Presentation.language reply.MediaType

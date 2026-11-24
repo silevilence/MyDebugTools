@@ -51,7 +51,7 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                             grid.Children.Add label)
                         grid
                     exports.ItemTemplate <- Templates.FuncDataTemplate<Export>(fun e _ ->
-                        cells [e.Entry; string e.Ordinal; $"0x{e.Rva:X8}"; e.Kind] :> Control)
+                        if isNull e then null else cells [e.Entry; string e.Ordinal; $"0x{e.Rva:X8}"; e.Kind] :> Control)
                     AutomationProperties.SetName(path, "DLL 文件路径")
                     let mutable image: DllImage option = None
                     let editor = SignatureEditor.Editor()
@@ -67,6 +67,8 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                     editor.Changed.Add(fun () -> bindings.Invalidate())
                     for field in [entry; arguments] do
                         field.PropertyChanged.Add(fun e -> if e.Property = TextBox.TextProperty then bindings.Invalidate())
+                    let declaration = TextBox(AcceptsReturn = true, PlaceholderText = "C 函数原型及相关结构体声明")
+                    let sessionInputs = Collections.Generic.Dictionary<string * string, string * string>()
                     let drafts = Collections.Generic.Dictionary<string * string, _>()
                     let mutable activeKey = None
                     let mutable dirty = false
@@ -74,6 +76,7 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                         dirty <- true
                         signatureStatus.Text <- "已修改 · 待确认")
                     let remember () =
+                        activeKey |> Option.iter (fun key -> sessionInputs[key] <- string declaration.Text, string arguments.Text)
                         if dirty then activeKey |> Option.iter (fun key -> drafts[key] <- editor.Snapshot)
                     let selectEntry () =
                         match image with
@@ -83,6 +86,9 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                                 remember()
                                 let key = dll.Identity, string entry.Text
                                 activeKey <- Some key
+                                let c, args = match sessionInputs.TryGetValue key with true, pair -> pair | _ -> "", "{}"
+                                declaration.Text <- c
+                                arguments.Text <- args
                                 match drafts.TryGetValue key with
                                 | true, snapshot ->
                                     editor.Restore snapshot
@@ -148,10 +154,22 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                     panel.Children.Add exports
                     panel.Children.Add(TextBlock(Text = "仅有导出表时，返回类型和参数未知。"))
                     panel.Children.Add entry
-                    let declaration = TextBox(AcceptsReturn = true, PlaceholderText = "C 函数原型及相关结构体声明")
+                    let signaturePanel = StackPanel(Spacing = 8., IsVisible = false)
+                    let callPanel = StackPanel(Spacing = 8., IsVisible = false)
+                    bindings.Control.IsVisible <- false
+                    let stage call =
+                        signaturePanel.IsVisible <- true
+                        callPanel.IsVisible <- call
+                        bindings.Control.IsVisible <- not call
+                    panel.Children.Add(row [
+                        button "准备函数调用" (fun () -> stage true)
+                        button "准备生成代码" (fun () -> stage false)
+                    ])
+                    panel.Children.Add signaturePanel
+                    panel.Children.Add callPanel
                     AutomationProperties.SetName(declaration, "C 声明")
-                    panel.Children.Add declaration
-                    panel.Children.Add(button "识别 C 声明" (fun () ->
+                    signaturePanel.Children.Add declaration
+                    signaturePanel.Children.Add(button "识别 C 声明" (fun () ->
                         try
                             let parsed = CDeclaration.Parse(declaration.Text, entry.Text)
                             entry.Text <- parsed.Signature.Entry
@@ -162,8 +180,8 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                         with e ->
                             signatureStatus.Text <- e.Message
                             diagnostic.Show("DLL 工作台", "核对签名", string entry.Text, e.Message)))
-                    panel.Children.Add editor.Panel
-                    panel.Children.Add(button "确认并保存签名" (fun () ->
+                    signaturePanel.Children.Add editor.Panel
+                    signaturePanel.Children.Add(button "确认并保存签名" (fun () ->
                         try
                             let dll = image |> Option.defaultWith (fun () -> invalidOp "请先打开 DLL。")
                             let s = editor.Read(entry.Text)
@@ -174,18 +192,27 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                         with e ->
                             signatureStatus.Text <- e.Message
                             diagnostic.Show("DLL 工作台", "核对签名", string entry.Text, e.Message)))
-                    panel.Children.Add signatureStatus
-                    panel.Children.Add diagnostic.Control
+                    signaturePanel.Children.Add signatureStatus
+                    signaturePanel.Children.Add diagnostic.Control
                     let callFields = StackPanel(Spacing = 4.)
                     let callContext = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
                     let resultSummary = SelectableTextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
                     let output = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
+                    let formProblem = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
+                    let invalid = Collections.Generic.HashSet<string>()
+                    let mutable updatingJson = false
+                    let resetFields () =
+                        invalid.Clear()
+                        formProblem.Text <- ""
+                        callFields.Children.Clear()
+                    arguments.PropertyChanged.Add(fun e ->
+                        if e.Property = TextBox.TextProperty && not updatingJson then resetFields())
                     let editArguments () =
                         try
                             let dll = image |> Option.defaultWith (fun () -> invalidOp "请先打开 DLL。")
                             let signature = store.ConfirmedDraft(dll, editor.Read entry.Text)
                             let values = System.Text.Json.Nodes.JsonNode.Parse(arguments.Text).AsObject()
-                            callFields.Children.Clear()
+                            resetFields()
                             for param in signature.Parameters do
                                 let input = TextBox()
                                 AutomationProperties.SetName(input, param.Name)
@@ -196,21 +223,28 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                                 input.TextChanged.Add(fun _ ->
                                     try
                                         values[param.Name] <- System.Text.Json.Nodes.JsonNode.Parse(input.Text)
-                                        arguments.Text <- values.ToJsonString()
-                                        callContext.Text <- ""
-                                    with _ -> callContext.Text <- $"{param.Name} 需要有效的 JSON 值。")
-                        with e -> callContext.Text <- e.Message
-                    panel.Children.Add(button "按已确认签名填写" editArguments)
-                    panel.Children.Add callFields
+                                        invalid.Remove param.Name |> ignore
+                                        updatingJson <- true
+                                        try arguments.Text <- values.ToJsonString()
+                                        finally updatingJson <- false
+                                        formProblem.Text <- String.concat "、" invalid
+                                    with _ ->
+                                        invalid.Add param.Name |> ignore
+                                        formProblem.Text <- $"{param.Name} 需要有效的 JSON 值。")
+                        with e -> formProblem.Text <- e.Message
+                    callPanel.Children.Add(button "按已确认签名填写" editArguments)
+                    callPanel.Children.Add callFields
+                    callPanel.Children.Add formProblem
                     let resultBody = StackPanel(Spacing = 4.)
                     resultBody.Children.Add callContext
-                    entry.TextChanged.Add(fun _ -> callFields.Children.Clear())
-                    panel.Children.Add(TextBlock(Text = "调用参数（JSON 对象，如 {\"a\":2,\"b\":3}）"))
-                    panel.Children.Add arguments
+                    entry.TextChanged.Add(fun _ -> resetFields())
+                    callPanel.Children.Add(TextBlock(Text = "调用参数（JSON 对象，如 {\"a\":2,\"b\":3}）"))
+                    callPanel.Children.Add arguments
                     let invoke () =
                         task {
                             try
                                 panel.IsEnabled <- false
+                                if invalid.Count > 0 then invalidOp formProblem.Text
                                 let dll = image |> Option.defaultWith (fun () -> invalidOp "请先打开 DLL。")
                                 let saved = store.ConfirmedDraft(dll, editor.Read entry.Text)
                                 let worker =
@@ -233,7 +267,7 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                                 diagnostic.Show("DLL 工作台", "调用函数", string entry.Text, $"{e.GetType().Name} · 0x{e.HResult:X8} · 请核对签名和实参。")
                             panel.IsEnabled <- true
                         } |> ignore
-                    panel.Children.Add(row [
+                    callPanel.Children.Add(row [
                         button "调用函数" invoke
                         button "重新开始会话" (fun () ->
                             let dialog = Window(Title = "重新开始会话", Width = 360., SizeToContent = SizeToContent.Height,
@@ -248,7 +282,7 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                     resultBody.Children.Add resultSummary
                     resultBody.Children.Add output
                     results.Set(ScrollViewer(Content = resultBody))
-                    panel.Children.Add results.Inline
+                    callPanel.Children.Add results.Inline
                     panel.Children.Add bindings.Control
                     let tabItem title (content: Control) =
                         let item = TabItem(Header = title, Content = content)

@@ -79,6 +79,7 @@ type Plugin() =
                                 | true, uri when uri.Scheme = "http" || uri.Scheme = "https" -> uri.Authority
                                 | _ -> "无有效 HTTP 地址"
                             $"{value methodBox} · {host}"
+                        let requestSubject = subject()
                         diagnosis.Clear()
                         try
                             let args = parameters.Read()
@@ -97,7 +98,7 @@ type Plugin() =
                                 let! reply = sender.Send(methodName, address, args, payload, source, TimeSpan.FromSeconds(float seconds), stop.Token)
                                 status.Text <- $"{reply.Summary} · {reply.ElapsedMs} ms"
                                 if reply.Status.IsNone then
-                                    diagnosis.Show("Web API", "发送请求", subject(), reply.Summary)
+                                    diagnosis.Show("Web API", "发送请求", requestSubject, reply.Summary)
                                 responseView.Show(reply, methodName + " " + address)
                             finally
                                 current <- None
@@ -106,7 +107,7 @@ type Plugin() =
                         with e ->
                             status.Text <- e.Message
                             let reason = if e :? InvalidOperationException && e.Message.StartsWith("请") then e.Message.Split('：')[0] else $"{e.GetType().Name} · 输入校验失败 · 0x{e.HResult:X8}"
-                            diagnosis.Show("Web API", "准备请求", subject(), reason)
+                            diagnosis.Show("Web API", "准备请求", requestSubject, reason)
                     }
                     events.Watch(sendButton.Click.Subscribe(fun _ -> send() |> ignore))
                     sendButton.Classes.Add("accent")
