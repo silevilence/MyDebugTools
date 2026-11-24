@@ -49,7 +49,7 @@ Status: ready-for-agent
 | [0005-14 选好函数和目标再开始监控](issues/14-prepare-api-monitor.md) | 无 | 已实施，待统一验收 |
 | [0005-15 持续阅读、筛选和回看采集记录](issues/15-read-monitor-session.md) | 无 | 已实施，待统一验收 |
 | [0005-16 编辑并发送一次 HTTP 请求](issues/16-compose-http-request.md) | 无 | 已实施，待统一验收 |
-| [0005-17 在定义、草稿与请求日志间切换](issues/17-preserve-http-drafts.md) | 无 | 待开始 |
+| [0005-17 在定义、草稿与请求日志间切换](issues/17-preserve-http-drafts.md) | 无 | 已实施，待统一验收 |
 | [0005-18 在 Dock 中对照输入与结果](issues/18-dock-debug-results.md) | 08 | 待开始 |
 | [0005-19 从各工具复制可用的错误报告](issues/19-copy-tool-diagnostics.md) | 02 | 待开始 |
 | [0005-20 发布版回归与首次使用者验收](issues/20-desktop-acceptance.md) | 01–19 | 待开始 |

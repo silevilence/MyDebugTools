@@ -51,7 +51,9 @@ type Plugin() =
                         parameters.Load d.Parameters
                         body.Load d.Body
                         tabs.SelectedItem <- paramsTab
-                    let definitions = Definitions(events, capture, apply, fun msg -> status.Text <- msg)
+                    let definitions = Definitions(events, capture, apply, (fun () -> parameters.DraftValues(), value timeout),
+                                                  (fun d (args, seconds) -> parameters.LoadDraft(d.Parameters, args); timeout.Text <- seconds),
+                                                  fun msg -> status.Text <- msg)
                     tabs.Items.Add(paramsTab) |> ignore
                     tabs.Items.Add(bodyTab) |> ignore
                     tabs.Items.Add(tab "接口定义" definitions.Content) |> ignore
@@ -93,7 +95,7 @@ type Plugin() =
                     events.Watch(sendButton.Click.Subscribe(fun _ -> send() |> ignore))
                     sendButton.Classes.Add("accent")
                     let toolbar = stack [
-                        TextBlock(Text = "发送 HTTP 请求", FontSize = 24.)
+                        definitions.Label
                         row [ TextBlock(Text = "方法"); methodBox; TextBlock(Text = "超时（秒）"); timeout ]
                         TextBlock(Text = "URL"); url
                         row [sendButton; cancel; button events "查看响应" (fun () -> tabs.SelectedItem <- response)]

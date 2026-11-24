@@ -66,7 +66,7 @@ type Parameters() =
         for _, handlers in entries do (handlers :> IDisposable).Dispose()
         entries.Clear()
 
-    let add (p: Parameter) =
+    let add (p: Parameter) initial =
         let handlers = new Events()
         let input title width text =
             let box = field title
@@ -74,7 +74,7 @@ type Parameters() =
             box.Text <- text
             box
         let name = input "参数名" 130. p.Name
-        let actual = input "实参" 160. p.DefaultValue
+        let actual = input "实参" 160. initial
         let defaultValue = input "默认值" 140. p.DefaultValue
         let mutable previousDefault = p.DefaultValue
         handlers.Watch(defaultValue.GetObservable(TextBox.TextProperty).Subscribe(fun next ->
@@ -91,7 +91,6 @@ type Parameters() =
         location.SelectedItem <- p.Location
         let read () =
             let key = (value name).Trim()
-            if key = "" then invalidOp "请填写参数名或移除空行"
             let position = string location.SelectedItem
             { Name = key; Location = position; TypeName = value typeName; Required = required.IsChecked.GetValueOrDefault()
               Description = value description; DefaultValue = value defaultValue },
@@ -112,15 +111,21 @@ type Parameters() =
     member _.Content(events) =
         stack [ TextBlock(Text = "路径参数使用 {参数名} 占位"); panel
                 button events "添加参数" (fun () ->
-                    add { Name = ""; Location = "查询"; TypeName = "string"; Required = false; Description = ""; DefaultValue = "" }) ]
+                    add { Name = ""; Location = "查询"; TypeName = "string"; Required = false; Description = ""; DefaultValue = "" } "") ]
     member _.Load(items) =
         clear()
         panel.Children.Clear()
-        Array.iter add items
+        items |> Array.iter (fun p -> add p p.DefaultValue)
+    member _.DraftValues() = entries |> Seq.map (fun (read, _) -> (snd (read())).Value) |> Seq.toArray
+    member _.LoadDraft(items, values) =
+        clear()
+        panel.Children.Clear()
+        Array.iter2 add items values
     member _.Definitions() = entries |> Seq.map (fun (read, _) -> fst (read())) |> Seq.toArray
     member _.Read() =
         entries |> Seq.map (fun (read, _) ->
             let p, arg = read()
+            if p.Name = "" then invalidOp "请填写参数名或移除空行"
             if p.Required && arg.Value = "" then invalidOp $"请填写必填参数 {p.Name}"
             arg) |> Seq.toArray
     interface IDisposable with member _.Dispose() = clear()
