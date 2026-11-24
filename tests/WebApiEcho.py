@@ -33,6 +33,7 @@ class Echo(BaseHTTPRequestHandler):
         echo = dict(method=self.command, path=unquote(url.path), query=parse_qs(url.query),
                     header=self.headers.get("X-Test"), media=media, data=data.hex(), fields=fields)
         routes = {
+            "/empty": (204, "text/plain", ""),
             "/xml": (200, "application/xml", "<root><value>42</value></root>"),
             "/broken": (200, "application/json", '{"值":?}'),
             "/html": (503, "text/html", '<h1>服务维护中</h1><p>稍后重试</p>'

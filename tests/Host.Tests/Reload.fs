@@ -11,7 +11,8 @@ open MyDebugTools.Samples
 let buildSample name output properties =
     let project = Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, $"../../samples/{name}/{name}.fsproj"))
     let start = ProcessStartInfo("dotnet", UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true)
-    for arg in [ "build"; project; "--no-restore"; "-o"; output ] @ properties do
+    start.Environment["MSBUILDDISABLENODEREUSE"] <- "1"
+    for arg in [ "build"; project; "--no-restore"; "--disable-build-servers"; "-m:1"; "-o"; output ] @ properties do
         start.ArgumentList.Add arg
     use build = Process.Start start
     let log = build.StandardOutput.ReadToEnd()

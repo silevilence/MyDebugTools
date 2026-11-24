@@ -50,7 +50,9 @@ let check () =
         let actions = children |> Seq.pick (function :? WrapPanel as p -> Some p | _ -> None)
         let copy = actions.Children |> Seq.cast<Button> |> Seq.find (fun b -> string b.Content = "复制代码")
         let preview = children |> Seq.pick (function :? TextBox as t -> Some t | _ -> None)
+        let update = actions.Children |> Seq.cast<Button> |> Seq.find (fun b -> string b.Content = "预览代码")
         let copyAndCheck marker =
+            update.RaiseEvent(RoutedEventArgs(Button.ClickEvent))
             copy.RaiseEvent(RoutedEventArgs(Button.ClickEvent))
             let text = clipboard.TryGetTextAsync().GetAwaiter().GetResult()
             if String.IsNullOrEmpty(text) || text <> preview.Text || not (text.Contains(marker: string)) then

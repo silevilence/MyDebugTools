@@ -19,7 +19,7 @@ function Wait-CaptureText($id, $pattern) {
 }
 
 function Wait-MonitorDialog {
-    $byName = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, '停用监控插件')
+    $byName = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, '停用插件')
     $byPid = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, $appProcess.Id)
     $condition = [Windows.Automation.AndCondition]::new($byPid, $byName)
     for ($i = 0; $i -lt 50; $i++) {
@@ -38,11 +38,16 @@ function Choose-MonitorDialog($dialog, $choice, $targetId) {
     Invoke-Control $choice
 }
 
+function Monitor-Tab($title) {
+    (Wait-Element $title ([Windows.Automation.ControlType]::TabItem)).GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+}
+
 function Check-ApiMonitor {
     Open-Manager
     Invoke-Control '启用 API 监控'
     Invoke-Control 'API 监控' $menuItem
     foreach ($arch in 'x86','x64') {
+        Monitor-Tab '准备监控'
         $dir = (Resolve-Path (Join-Path $DllFixtures $arch)).Path
         Set-MonitorText '监控 DLL 路径' "$dir/fixture.dll"
         Invoke-Control '读取 DLL 导出'
@@ -54,6 +59,7 @@ function Check-ApiMonitor {
         $first = Wait-CaptureText 'call-detail' 'a=0，b=100'
         if ($first -notmatch '返回：100' -or $first -notmatch 'monitor_target\+0x') { throw "Wrong detail $first" }
         if ($arch -eq 'x86') {
+            Monitor-Tab '准备监控'
             $list = $window.FindFirst([Windows.Automation.TreeScope]::Descendants,
                 [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty,'chosen-functions'))
             $item = $list.FindFirst([Windows.Automation.TreeScope]::Descendants,
@@ -77,11 +83,25 @@ function Check-ApiMonitor {
     }
     try {
         Call-Add 1
+        Monitor-Tab '准备监控'
+        $mode = Wait-Element '监控目标模式' ([Windows.Automation.ControlType]::ComboBox)
+        $mode.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+        (Wait-Element '附加进程' ([Windows.Automation.ControlType]::ListItem)).GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+        $mode.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
         Set-MonitorText '目标进程 ID' ([string]$target.Id)
         Invoke-Control '附加并监控'
         [void](Wait-CaptureText 'capture-status' "PID $($target.Id).*采集中")
         Call-Add 2
         $saved = Wait-CaptureText 'call-detail' '返回：102'
+        if ($env:MYDEBUGTOOLS_TEST_EVIDENCE) {
+            . "$PSScriptRoot/DesktopUx.ps1"
+            Initialize-UxCapture
+            Snapshot 'active-monitor'
+        }
+        Set-MonitorText '筛选记录函数' 'absent'
+        [void](Wait-Element '匹配 0 / 共 1 条记录' $label)
+        Invoke-Control '清除记录筛选'
+        [void](Wait-Element '匹配 1 / 共 1 条记录' $label)
         Open-Manager
         Invoke-Control '停用 API 监控'
         $dialog = Wait-MonitorDialog
@@ -90,27 +110,41 @@ function Check-ApiMonitor {
         Call-Add 4
         Invoke-Control 'API 监控' $menuItem
         [void](Wait-CaptureText 'capture-status' '3 次调用')
+        if ((Wait-CaptureText 'call-detail' '返回：102') -ne $saved) { throw 'New arrivals changed the selected call' }
+        (Wait-Element '视图' $menuItem).GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+        Invoke-Control '恢复默认布局' $menuItem
+        [void](Wait-CaptureText 'capture-status' '采集中.*3 次调用')
+        (Wait-Element '视图' $menuItem).GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+        Invoke-Control '隐藏' $menuItem
+        $running = $window.FindAll(4,[Windows.Automation.Condition]::TrueCondition) | Where-Object { $_.Current.Name -like "查看采集 · *$($target.Id)*" -and $_.Current.ControlType -eq $button } | Select-Object -First 1
+        if (!$running) { throw 'Missing running session shortcut while hidden' }
+        $running.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+        [void](Wait-CaptureText 'capture-status' '3 次调用')
         Open-Manager
         Invoke-Control '停用 API 监控'
-        Choose-MonitorDialog (Wait-MonitorDialog) '结束监控并停用' $target.Id
+        Choose-MonitorDialog (Wait-MonitorDialog) '结束采集并停用' $target.Id
         [void](Wait-Element '启用 API 监控' $button)
         Call-Add 5
         Invoke-Control '启用 API 监控'
         [void](Wait-Element '重新加载 API 监控' $button)
         if ($PreviousMonitorPlugin) { Copy-Item -LiteralPath $newMonitor -Destination $liveMonitor }
         Invoke-Control '重新加载 API 监控'
-        [void](Wait-Element '重新加载 API 监控' $button)
+        [void](Wait-Element 'API 监控 · 已重新加载' $label)
         Invoke-Control 'API 监控' $menuItem
         [void](Wait-CaptureText 'capture-status' "PID $($target.Id).*已结束.*3 次调用")
         if ((Wait-CaptureText 'call-detail' '返回：102') -ne $saved) { throw 'Reload changed captured fields' }
+        Monitor-Tab '准备监控'
         [void](Wait-CaptureText 'function-preview' 'Windows SDK')
         [void]$appProcess.CloseMainWindow()
         if (!$appProcess.WaitForExit(8000)) { throw 'Desktop did not close' }
         Start-Desktop
-        Invoke-Control '启用 API 监控'
+        Open-Manager
+        if (Find-Element '启用 API 监控' $button) { Invoke-Control '启用 API 监控' }
         Invoke-Control 'API 监控' $menuItem
-        [void](Wait-Element '附加并监控' $button)
+        [void](Wait-Element '监控目标模式' ([Windows.Automation.ControlType]::ComboBox))
+        Monitor-Tab '会话记录'
         [void](Wait-CaptureText 'capture-status' '^$')
+        Monitor-Tab '准备监控'
         'PASS continue, detach, reload detail and empty history after restart'
         Set-MonitorText '搜索 SDK 函数' 'kernel32.dll!ExitProcess'
         [void](Wait-CaptureText 'function-preview' '此函数不会返回')
@@ -118,6 +152,10 @@ function Check-ApiMonitor {
         Set-MonitorText '搜索 SDK 函数' 'kernel32.dll!GetSystemTime'
         [void](Wait-CaptureText 'function-preview' 'LPSYSTEMTIME lpSystemTime')
         Invoke-Control '加入监控'
+        $mode = Wait-Element '监控目标模式' ([Windows.Automation.ControlType]::ComboBox)
+        $mode.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+        (Wait-Element '附加进程' ([Windows.Automation.ControlType]::ListItem)).GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+        $mode.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
         Set-MonitorText '目标进程 ID' ([string]$target.Id)
         Invoke-Control '附加并监控'
         [void](Wait-CaptureText 'capture-status' '采集中')

@@ -21,25 +21,31 @@ function Check-WebApi {
     function Status-Matches($pattern) {
         $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, $label)
         for ($attempt = 0; $attempt -lt 50; $attempt++) {
-            $visible = $window.FindAll([Windows.Automation.TreeScope]::Descendants, $condition) | ForEach-Object { $_.Current.Name }
-            if ($visible -match $pattern) { return }
+            try {
+                $visible = $window.FindAll([Windows.Automation.TreeScope]::Descendants, $condition) | ForEach-Object { $_.Current.Name }
+                if ($visible -match $pattern) { return }
+            } catch [System.Runtime.InteropServices.COMException], [Windows.Automation.ElementNotAvailableException] {
+                if ($attempt -eq 49) { throw }
+            }
             Start-Sleep -Milliseconds 80
         }
         throw "Missing status [$pattern] among $visible"
     }
     function Send-Request {
         Invoke-Control '发送'
+        Invoke-Control '查看响应'
         [void](Wait-Element '响应原文' $edit)
         [void](Wait-Element '发送' $button)
     }
     function Enable-Web {
         Open-Manager
-        Invoke-Control '启用 Web API'
+        if (Find-Element '启用 Web API' $button) { Invoke-Control '启用 Web API' }
         Invoke-Control 'Web API' $menuItem
     }
     function New-Draft {
         Use-Tab '接口定义'
         Invoke-Control '新建临时请求'
+        if (Find-Element '保留草稿并继续' $button) { Invoke-Control '保留草稿并继续' }
         [void](Wait-Element '添加参数' $button)
     }
     function Open-Saved {
@@ -110,7 +116,10 @@ function Check-WebApi {
             if ((Read-Field '日志详情') -notmatch "查询 · id = $($pair[1])") { throw 'Missing persisted actual value' }
         }
         Invoke-Control '清空请求日志'
-        Assert-Same '' (Read-Field '日志详情')
+        Invoke-Control '取消清空'
+        Invoke-Control '清空请求日志'
+        Invoke-Control '确认清空日志'
+        [void](Wait-Element '尚无请求日志。发送一次请求后可在这里查看实参。' $label)
         Open-Saved
         Assert-Same '1001' (Read-Field '实参')
         Send-Request
@@ -209,6 +218,11 @@ function Check-WebApi {
         'PASS JSON editor, raw XML, URL-encoded fields, multipart and binary byte equality'
 
         New-Draft
+        Write-Field 'URL' "$base/empty"
+        Send-Request
+        Status-Matches 'HTTP 204.*ms'
+        [void](Wait-Element '此响应没有正文。' $label)
+        Assert-Same '' (Read-Field '响应原文')
         foreach ($route in 'xml','broken','html') {
             Write-Field 'URL' "$base/$route"
             Send-Request
