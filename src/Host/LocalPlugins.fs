@@ -9,12 +9,6 @@ open System.Text.Json
 open System.Threading.Tasks
 open MyDebugTools.Contracts
 
-[<CLIMutable>]
-type PluginExtensionInfo = { PageId: string; Title: string }
-
-[<CLIMutable>]
-type PluginManifest = { Id: string; Title: string; Assembly: string; EntryType: string; Version: string; Pages: string array; Extensions: PluginExtensionInfo array }
-
 type private PluginContext(entry: string) =
     inherit AssemblyLoadContext(Path.GetFileNameWithoutExtension entry, true)
     let resolver = AssemblyDependencyResolver(entry)
@@ -51,13 +45,26 @@ type LocalPlugins(host: Host, settingsFile: string) =
     let options = EnumerationOptions(RecurseSubdirectories = true, IgnoreInaccessible = false,
                                      AttributesToSkip = FileAttributes.ReparsePoint)
 
-    let manifest folder =
-        let value = JsonSerializer.Deserialize<PluginManifest>(File.ReadAllText(Path.Combine(folder, "plugin.json")))
-        if isNull (box value) || [value.Id; value.Title; value.Assembly; value.EntryType] |> List.exists String.IsNullOrWhiteSpace then
-            invalidOp "plugin.json 缺少 Id、Title、Assembly 或 EntryType"
-        if Path.GetFileName(value.Assembly) <> value.Assembly || not (value.Assembly.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)) then
-            invalidOp "Assembly 必须是目录中的 DLL 文件名"
-        value
+    let manifest folder = PluginPackage.manifest folder
+    let packageList = Path.ChangeExtension(settingsFile, ".packages.json")
+    let packageRoot = Path.Combine(Path.GetDirectoryName(settingsFile), "packages")
+    let readPackages () =
+        if File.Exists packageList then JsonSerializer.Deserialize<InstalledPackage array>(File.ReadAllText packageList)
+        else [||]
+    let packageFolder (item: InstalledPackage) =
+        if not (Guid.TryParseExact(item.Folder, "N") |> fst) then invalidOp "受管包目录标识无效"
+        Path.Combine(packageRoot, item.Folder)
+    let savePackages (items: InstalledPackage array) =
+        let temp = packageList + "." + Guid.NewGuid().ToString("N")
+        try
+            File.WriteAllText(temp, JsonSerializer.Serialize items)
+            File.Move(temp, packageList, true)
+        finally
+            if File.Exists temp then File.Delete temp
+    let lockCatalog () =
+        Directory.CreateDirectory(Path.GetDirectoryName settingsFile) |> ignore
+        File.Open(settingsFile + ".lock", FileMode.OpenOrCreate, FileAccess.Write, FileShare.None)
+    let packages = Dictionary<string, InstalledPackage>()
 
     let sweep () =
         for item in retired.ToArray() do
@@ -124,7 +131,8 @@ type LocalPlugins(host: Host, settingsFile: string) =
         bundled.Add info.Id |> ignore
 
     member _.Source(id) =
-        if locations.ContainsKey id && not (bundled.Contains id) then "外部开发目录"
+        if packages.ContainsKey id then "外部 ZIP"
+        elif locations.ContainsKey id && not (bundled.Contains id) then "外部开发目录"
         else "随附普通"
 
     member _.Version(id) =
@@ -133,10 +141,49 @@ type LocalPlugins(host: Host, settingsFile: string) =
         | _ -> "未知"
 
     member _.Restore() = [
+        for item in readPackages() do
+            try
+                let folder = packageFolder item
+                let m = manifest folder
+                if m.Id <> item.Id then invalidOp "安装包标识与登记不符"
+                attach folder m
+                packages.Add(m.Id, item)
+            with e -> yield $"{item.Id}：{e.Message}"
         for path in savedPaths() do
             try attach path (manifest path)
             with e -> yield $"{path}：{e.Message}"
     ]
+
+    member _.Package id =
+        match packages.TryGetValue id with true, item -> Some item | _ -> None
+
+    member this.Install(preview: PackagePreview) =
+        use guard = lockCatalog()
+        let items = readPackages()
+        let id = preview.Manifest.Id
+        match items |> Array.tryFind (fun item -> item.Id = id) with
+        | Some item when item.Hash = preview.Hash && packages.ContainsKey id -> ()
+        | Some _ -> invalidOp "同 ID 的包已安装。请确认替换版本。"
+        | None ->
+            if host.Plugins |> List.exists (fun p -> p.Id = id) then invalidOp $"与现有插件 ID 冲突：{id}"
+            let item = { Id = id; Folder = Guid.NewGuid().ToString("N"); Hash = preview.Hash; Source = preview.Source }
+            let folder = packageFolder item
+            Directory.CreateDirectory folder |> ignore
+            let mutable attached = false
+            try
+                PluginPackage.extract preview folder
+                attach folder preview.Manifest
+                attached <- true
+                host.Enable id
+                savePackages (Array.append items [|item|])
+                packages.Add(id, item)
+            with _ ->
+                if attached then
+                    host.Remove id
+                    locations.Remove id |> ignore
+                    manifests.Remove id |> ignore
+                Directory.Delete(folder, true)
+                reraise()
 
     member _.Relations id =
         match host.Relations id, manifests.TryGetValue id with

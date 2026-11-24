@@ -4,6 +4,7 @@
     <Compile Include="Lifecycle.fs" />
     <Compile Include="Extensions.fs" />
     <Compile Include="Reload.fs" />
+    <Compile Include="Packages.fs" />
     <Compile Include="Monitoring.fs" />
     <Compile Include="Targets.fs" />
     <Compile Include="VersionMismatch.fs" />

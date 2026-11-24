@@ -165,6 +165,12 @@ type Host() =
             if hadTabs then tabsChanged.Trigger()
         | _ -> ()
 
+    member this.Remove(id) =
+        let plugin = plugins |> Seq.find (fun p -> p.Id = id)
+        this.Disable id
+        plugins.Remove plugin |> ignore
+        relations.Remove id |> ignore
+
     interface IDisposable with
         member _.Dispose() =
             for handle in active.Values |> Seq.toArray |> Array.rev do Task.Run(fun () -> handle.DisposeAsync().AsTask()).GetAwaiter().GetResult()

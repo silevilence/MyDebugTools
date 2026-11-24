@@ -295,6 +295,38 @@ type MainWindow() as window =
                 let! folders = window.StorageProvider.OpenFolderPickerAsync(FolderPickerOpenOptions(Title = "选择插件编译目录"))
                 if folders.Count > 0 then addDirectory (folders[0].TryGetLocalPath())
             } |> ignore)
+        addButton tools "加载插件包…" (fun () ->
+            task {
+                try
+                    let! files = window.StorageProvider.OpenFilePickerAsync(FilePickerOpenOptions(Title = "选择本地插件 ZIP"))
+                    if files.Count > 0 then
+                        let! preview = System.Threading.Tasks.Task.Run(fun () -> PluginPackage.preview (files[0].TryGetLocalPath()))
+                        let m = preview.Manifest
+                        let version = if String.IsNullOrWhiteSpace m.Version then "未知" else m.Version
+                        let existing = host.Plugins |> List.tryFind (fun p -> p.Id = m.Id)
+                        let prior = existing |> Option.map (fun p -> p.Title + " · " + catalog.Source p.Id) |> Option.defaultValue "无"
+                        match catalog.Package m.Id with
+                        | Some old when old.Hash = preview.Hash ->
+                            filter.Text <- m.Id
+                            feedback.Text <- "此包已安装。"
+                        | _ ->
+                            let dialog = Window(Title = "插件包预览", Width = 460., SizeToContent = SizeToContent.Height,
+                                                WindowStartupLocation = WindowStartupLocation.CenterOwner)
+                            let content = StackPanel(Spacing = 8., Margin = Thickness 16.)
+                            content.Children.Add(TextBlock(Text = $"{m.Title} · {m.Id} · 版本 {version}\\n{preview.Source}\\n已有同 ID 插件 · {prior}", TextWrapping = Media.TextWrapping.Wrap))
+                            addButton content "取消" (fun () -> dialog.Close(false))
+                            addButton content "加载并启用" (fun () -> dialog.Close(true))
+                            dialog.Content <- content
+                            let! ok = dialog.ShowDialog<bool>(window)
+                            if ok then
+                                catalog.Install preview
+                                filter.Text <- m.Id
+                                feedback.Text <- $"已启用 · {m.Title}"
+                                refresh()
+                with e ->
+                    feedback.Text <- $"加载插件包失败。请检查 ZIP 和入口程序集。{e.GetBaseException().Message}"
+                    managerDiagnostic.Show("插件管理", "加载插件包", "本地 ZIP", e.GetBaseException().Message)
+            } |> ignore)
         manager.Children.Add tools
         manager.Children.Add feedback
         manager.Children.Add managerDiagnostic.Control
