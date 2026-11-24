@@ -234,4 +234,5 @@ type Plugin() =
                               | all -> Some (all |> Array.map string |> String.concat "、")
                           Stop = stop }
             reg.Own { new IDisposable with member _.Dispose() = stop().GetAwaiter().GetResult() }
+            PageDocumentation.describe reg "api.monitor" "准备采集并查看已记录的调用"
             reg.Page { Id = "api.monitor"; Title = "API 监控"; Create = View.create reg.CurrentTarget }

@@ -242,6 +242,7 @@ type Plugin() =
     interface IDesktopPlugin with
         member _.Activate registry =
             let outlet = PanelOutlet("DLL 依赖")
+            PageDocumentation.describe registry "dll.dependencies.detail" "查看静态依赖解析详情"
             registry.Page { Id = "dll.dependencies.detail"; Title = "依赖详情"; Create = fun () -> outlet.Companion }
             let create () =
                 let view = View.create()

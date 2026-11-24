@@ -8,6 +8,7 @@ open MyDebugTools.Contracts
 type Workbench() =
     interface IDesktopPlugin with
         member _.Activate registry =
+            PageDocumentation.describe registry "sample.workbench" "选择示例请求、编辑草稿并执行页面菜单操作"
             let options = [| "请求 A"; "请求 B" |]
             let selector = lazy (ComboBox(ItemsSource = options, SelectedIndex = 0))
             let selected () =

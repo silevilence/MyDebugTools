@@ -14,12 +14,17 @@ type Plugin = {
     Create: unit -> IDesktopPlugin
 }
 
+type ExtensionPointInfo = { Id: string; Kind: string; Version: int; Content: string; Context: string }
+type InterfaceInfo = { Id: string; Description: string; Points: ExtensionPointInfo list }
+
 type Host() =
     let mutable target: DebugTarget option = None
     let root = Context.Create()
     let plugins = ResizeArray<Plugin>()
     let active = Dictionary<string, PluginHandle>()
     let pages = Dictionary<string, Page>()
+    let descriptions = Dictionary<string, string>()
+    let failures = Dictionary<string, string>()
     let relations = Dictionary<string, string list * (string * string) list>()
     let dllTabs = ResizeArray<string * DllTab>()
     let tabPoints = Dictionary<string * string, DllTabPoint>()
@@ -69,6 +74,21 @@ type Host() =
                 | _ -> ()
     ]
 
+    member _.Failure id = match failures.TryGetValue id with true, reason -> [reason] | _ -> []
+    member _.Interfaces = [
+        for page in pages.Values do
+            let description = match descriptions.TryGetValue page.Id with true, s -> s | _ -> "未声明"
+            let published = [
+                for p in points.Values do
+                    if p.PageId = page.Id then
+                        yield { Id = p.PointId; Kind = "menu"; Version = p.Version; Content = "MenuExtension"; Context = "Selection() 返回当前选中项字符串" }
+                for p in tabPoints.Values do
+                    if p.PageId = page.Id then
+                        yield { Id = p.PointId; Kind = "dllTab"; Version = p.Version; Content = "DllTab"; Context = "OpenFile(path) 接收 DLL 路径，Close() 结束文件会话" }
+            ]
+            yield { Id = page.Id; Description = description; Points = published }
+    ]
+
     member _.Relations id = match relations.TryGetValue id with true, value -> Some value | _ -> None
     member _.Plugins = plugins |> Seq.toList
     member _.Pages = pages.Values |> Seq.toList
@@ -79,6 +99,7 @@ type Host() =
             let plugin = plugins |> Seq.find (fun p -> p.Id = id)
             // Finish registration before publishing any of this plugin's pages.
             let additions = ResizeArray<Page>()
+            let documentation = Dictionary<string, string>()
             let declared = ResizeArray<MenuPoint>()
             let actions = ResizeArray<MenuExtension>()
             let tabs = ResizeArray<DllTab>()
@@ -113,6 +134,8 @@ type Host() =
                         member _.MenuAction action = actions.Add action
                         member _.Monitor session = monitor <- Some session
                         member _.Own resource = resources.Push resource
+                    interface IPageDocumentation with
+                        member _.Describe(pageId, description) = documentation[pageId] <- description
                 }
                 let owners = Seq.append (declared |> Seq.map _.PageId) (tabDeclarations.Values |> Seq.map _.PageId)
                 for pageId in owners do
@@ -124,7 +147,11 @@ type Host() =
                     handle.Await().GetAwaiter().GetResult() |> ignore
                     handle)
                 let handle = starting.GetAwaiter().GetResult()
-                for page in additions do pages.Add(page.Id, page)
+                for page in additions do
+                    pages.Add(page.Id, page)
+                    match documentation.TryGetValue page.Id with
+                    | true, description when not (String.IsNullOrWhiteSpace description) -> descriptions[page.Id] <- description
+                    | _ -> ()
                 for point in declared do points.Add((point.PageId, point.PointId), point)
                 for action in actions do extensions.Add(id, action)
                 for tab in tabs do dllTabs.Add(id, tab)
@@ -137,18 +164,22 @@ type Host() =
                                         for key in tabDeclarations.Keys do tabPoints.Remove key |> ignore
                                         for point in declared do points.Remove((point.PageId, point.PointId)) |> ignore
                                         extensions.RemoveAll(fun (owner, _) -> owner = id) |> ignore
-                                        for page in additions do pages.Remove page.Id |> ignore }
+                                        for page in additions do
+                                            pages.Remove page.Id |> ignore
+                                            descriptions.Remove page.Id |> ignore }
                 active.Add(id, handle)
                 relations[id] <-
                     [for page in additions -> page.Id],
                     [for tab in tabs -> tab.PageId, tab.Title + "（页签）"
                      for action in actions -> action.PageId, action.Title + "（菜单）"]
-            with _ ->
+                failures.Remove id |> ignore
+            with e ->
+                failures[id] <- e.GetBaseException().Message
                 release()
                 reraise()
             if tabs.Count > 0 then tabsChanged.Trigger()
 
-    member this.Add(plugin) =
+    member this.Add(plugin: Plugin) =
         if plugins |> Seq.exists (fun p -> p.Id = plugin.Id) then invalidOp $"插件标识重复：{plugin.Id}"
         plugins.Add plugin
         if plugin.Core then this.Enable plugin.Id
@@ -170,6 +201,7 @@ type Host() =
         this.Disable id
         plugins.Remove plugin |> ignore
         relations.Remove id |> ignore
+        failures.Remove id |> ignore
 
     interface IDisposable with
         member _.Dispose() =

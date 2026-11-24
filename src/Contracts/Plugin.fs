@@ -73,5 +73,15 @@ type Registration =
     abstract Monitor: MonitorSession -> unit
     abstract Own: IDisposable -> unit
 
+/// Optional addition to the original registration contract.
+type IPageDocumentation =
+    abstract Describe: pageId: string * description: string -> unit
+
+module PageDocumentation =
+    let describe (registry: Registration) pageId description =
+        match registry with
+        | :? IPageDocumentation as docs -> docs.Describe(pageId, description)
+        | _ -> ()
+
 type IDesktopPlugin =
     abstract Activate: Registration -> unit

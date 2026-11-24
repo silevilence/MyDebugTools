@@ -36,6 +36,21 @@ type private PluginContext(entry: string) =
 
 type private Retired = { Id: string; Context: WeakReference; Snapshot: DirectoryInfo }
 
+type PluginStatus = {
+    Id: string; Source: string; Origin: string; Version: string
+    Enabled: bool; State: string; EffectiveVersion: string option; Reasons: string list
+}
+
+module PluginStatus =
+    let effectiveSources (formal: PluginStatus option) (temporary: PluginStatus option) = [
+        match formal, temporary with
+        | Some row, Some active ->
+            yield { row with State = "superseded"; EffectiveVersion = active.EffectiveVersion }
+        | Some row, None -> yield row
+        | None, _ -> ()
+        yield! Option.toList temporary
+    ]
+
 type LocalPlugins(host: Host, settingsFile: string) =
     let locations = Dictionary<string, string>()
     let bundled = HashSet<string>()
@@ -139,6 +154,17 @@ type LocalPlugins(host: Host, settingsFile: string) =
         match manifests.TryGetValue id with
         | true, info when not (String.IsNullOrWhiteSpace info.Version) -> info.Version
         | _ -> "未知"
+
+    member this.Status = [
+        for plugin in host.Plugins do
+            let enabled = host.Enabled plugin.Id
+            let version = this.Version plugin.Id
+            let formal = { Id = plugin.Id; Source = "formal"; Origin = if plugin.Core then "随附核心" else this.Source plugin.Id
+                           Version = version; Enabled = enabled; State = if enabled then "active" else "disabled"
+                           EffectiveVersion = if enabled then Some version else None
+                           Reasons = host.Failure plugin.Id @ host.Mismatches plugin.Id }
+            yield! PluginStatus.effectiveSources (Some formal) None
+    ]
 
     member _.Restore() = [
         for item in readPackages() do

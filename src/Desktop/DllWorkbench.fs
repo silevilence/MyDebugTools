@@ -22,6 +22,8 @@ let private row (controls: Control list) =
 let plugin (window: Window) (host: Host) (requests: IObservable<string * string option>) =
     { new IDesktopPlugin with
         member _.Activate registry =
+            PageDocumentation.describe registry "dll.debugger" "浏览 DLL 并使用已注册的工具页签"
+            PageDocumentation.describe registry "dll.debugger.result" "查看 DLL 函数调用结果"
             let tabPoint = { DllTabPoint.PageId = "dll.debugger"; PointId = "tabs"; Version = 1 }
             registry.DllTabPoint tabPoint
             let mutable session: CallSession option = None

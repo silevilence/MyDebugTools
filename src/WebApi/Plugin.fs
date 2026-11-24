@@ -19,6 +19,8 @@ type Plugin() =
             registry.Own sender
 
             let outlet = PanelOutlet("HTTP 响应")
+            PageDocumentation.describe registry "web.api.response" "查看 HTTP 响应"
+            PageDocumentation.describe registry "web.api" "编辑接口并发送 HTTP 请求"
             registry.Page { Id = "web.api.response"; Title = "HTTP 响应"; Create = fun () -> outlet.Companion }
             registry.Page {
                 Id = "web.api"; Title = "Web API"

@@ -33,6 +33,8 @@ let ``upgrading one point suspends only its incompatible action`` () =
             else catalog.AddDirectory output
             host.Enable "local.workbench"
             checkVersion host version
+            let row = catalog.Status |> List.find (fun p -> p.Id = "actions")
+            Assert.Equal<string list>(host.Mismatches "actions", row.Reasons)
         host.Disable "local.workbench"
         let _, pending = catalog.CheckUnloads()
         Assert.Empty pending

@@ -20,6 +20,10 @@ module DeveloperTools =
     let tool name description (action: Delegate) =
         McpServerTool.Create(action, McpServerToolCreateOptions(Name = name, Description = description))
 
+    let methodTool name description (instance: obj) methodName =
+        McpServerTool.Create(instance.GetType().GetMethod(methodName: string), instance,
+                             McpServerToolCreateOptions(Name = name, Description = description))
+
     let documentation version =
         let resource name =
             use input = Assembly.GetExecutingAssembly().GetManifestResourceStream(name)

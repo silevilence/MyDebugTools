@@ -124,7 +124,8 @@ type MainWindow() as window =
     inherit Window(Title = "MyDebugTools", Width = 860., Height = 580., MinWidth = 580., MinHeight = 400.)
     let host = new Host()
     let catalog = LocalPlugins(host, Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "plugins.json"))
-    let developer = new DeveloperServer(Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "developer.json"), Updates.current, [])
+    let inspection = Inspection(host, catalog, fun read -> Avalonia.Threading.Dispatcher.UIThread.Invoke(Func<string>(read)))
+    let developer = new DeveloperServer(Path.Combine(Environment.GetEnvironmentVariable("LOCALAPPDATA"), "MyDebugTools", "developer.json"), Updates.current, inspection.Tools)
     let folderInput = TextBox(PlaceholderText = "本地插件编译目录")
     let cache = Dictionary<string, Control>()
     let menu = Menu()
@@ -544,19 +545,19 @@ type MainWindow() as window =
         panel.Children.Add(button label run |> VirtualDom.create)
 
     do
-        let corePage (page: Page) =
+        let corePage description (page: Page) =
             host.Add {
                 Id = page.Id; Title = page.Title; Core = true
-                Create = fun () -> { new IDesktopPlugin with member _.Activate reg = reg.Page page }
+                Create = fun () -> { new IDesktopPlugin with member _.Activate reg = PageDocumentation.describe reg page.Id description; reg.Page page }
             }
         workspace.Focused.Add(fun id ->
             if current <> id && (host.Pages |> List.exists (fun p -> p.Id = id)) then updateNavigation id)
         views.SubmenuOpened.Add(fun _ ->
             for page, item in Seq.zip host.Pages (views.Items |> Seq.cast<MenuItem>) do item.IsChecked <- workspace.IsOpen page.Id)
         pageArea.Focusable <- true
-        corePage { Id = "core.home"; Title = "首页"; Create = fun () -> ScrollViewer(Content = home) }
-        corePage { Id = "core.manager"; Title = "插件管理"; Create = fun () -> ScrollViewer(Content = manager) }
-        corePage { Id = "core.targets"; Title = "调试目标"; Create = targets window host openTask }
+        corePage "打开调试工具并查看宿主更新" { Id = "core.home"; Title = "首页"; Create = fun () -> ScrollViewer(Content = home) }
+        corePage "管理已安装插件、本地开发目录和 MCP 连接" { Id = "core.manager"; Title = "插件管理"; Create = fun () -> ScrollViewer(Content = manager) }
+        corePage "选择 DLL 文件或进程作为当前调试目标" { Id = "core.targets"; Title = "调试目标"; Create = targets window host openTask }
         host.Add { Id = "dll.debugger"; Title = "DLL 工作台"; Core = false; Create = fun () -> DllWorkbench.plugin window host dllRequests.Publish }
         host.Add { Id = "sample.workbench"; Title = "工作台"; Core = false; Create = fun () -> Workbench() }
         host.Add { Id = "sample.actions"; Title = "工作台扩展"; Core = false; Create = fun () -> WorkbenchActions() }
