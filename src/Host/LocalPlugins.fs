@@ -231,7 +231,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
         let formal = host.Plugins |> List.tryFind (fun p -> p.Id = id)
         if formal |> Option.exists _.Core then invalidOp $"{id} · 核心插件固定加载"
         if packages.ContainsKey id && packages[id].PendingRemoval then invalidOp $"{id} · 正式版等待完成卸载"
-        rejectTemporary id
+        let previousEntry = match temporary.TryGetValue id with true, item -> Some item | _ -> None
         let mutable stage = "复制编译输出"
         try
             let! candidate = Task.Run(fun () -> copyOutput folder.FullName id)
@@ -241,32 +241,43 @@ type LocalPlugins(host: Host, settingsFile: string) =
                 let! proceed = if approved then allowStop id else Task.FromResult false
                 if not proceed then return $"{id} · 已取消，当前版本继续运行"
                 else
-                    let prior = { Directory = folder.FullName; Manifest = candidate.Manifest; HasFormal = formal.IsSome
-                                  FormalEnabled = host.Enabled id; FormalImage = activeImage id }
+                    let wasEnabled = host.Enabled id
+                    let previous = activeImage id
+                    let next =
+                        match previousEntry with
+                        | Some old -> { old with Directory = folder.FullName; Manifest = candidate.Manifest }
+                        | None -> { Directory = folder.FullName; Manifest = candidate.Manifest; HasFormal = formal.IsSome
+                                    FormalEnabled = wasEnabled; FormalImage = previous }
+                    // On first takeover, transfer the retained formal snapshot to the overlay.
+                    let mutable keepPrevious = false
                     try
-                        stage <- "撤下正式版"
-                        if prior.FormalEnabled then
-                            host.Disable id
-                            refresh()
-                        if formal.IsNone then
-                            host.Add { Id = id; Title = candidate.Manifest.Title; Core = false
-                                       Create = fun () -> invalidOp "请从开发客户端加载临时插件" }
-                        stage <- "激活临时版"
-                        enableImage id (Some candidate)
-                        temporary[id] <- prior
-                        refresh()
-                        temporaryErrors.Remove id |> ignore
-                        return $"{id} · 临时版已启用"
-                    with error ->
-                        temporary.Remove id |> ignore
                         try
+                            stage <- "撤下当前版本"
+                            if wasEnabled then
+                                host.Disable id
+                                refresh()
+                            if formal.IsNone then
+                                host.Add { Id = id; Title = candidate.Manifest.Title; Core = false
+                                           Create = fun () -> invalidOp "请从开发客户端加载临时插件" }
+                            stage <- "激活临时版"
+                            enableImage id (Some candidate)
+                            temporary[id] <- next
+                            refresh()
+                            keepPrevious <- previousEntry.IsNone
+                            temporaryErrors.Remove id |> ignore
+                            return $"{id} · 临时版已启用"
+                        with error ->
+                            match previousEntry with
+                            | Some old -> temporary[id] <- old
+                            | None -> temporary.Remove id |> ignore
                             if formal.IsNone && host.Plugins |> List.exists (fun p -> p.Id = id) then host.Remove id
                             elif stage = "激活临时版" && host.Enabled id then host.Disable id
                             refresh()
-                            if prior.FormalEnabled then enableImage id prior.FormalImage
+                            if wasEnabled then enableImage id previous
                             refresh()
-                        finally release prior.FormalImage
-                        return raise error
+                            return raise error
+                    finally
+                        if not keepPrevious then release previous
             finally candidate.Release()
         with e ->
             let message = $"{id} · {stage}失败 · {e.GetBaseException().Message}"

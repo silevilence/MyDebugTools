@@ -11,6 +11,22 @@ open ModelContextProtocol.Client
 open ModelContextProtocol.Protocol
 open Xunit
 
+/// Real collectible plugin that fails after declaring UI and owning live resources.
+type PartialActivation() =
+    interface IDesktopPlugin with
+        member _.Activate registry =
+            registry.Page { Id = "partial.page"; Title = "partial"; Create = fun () -> failwith "unused" }
+            let subscription = AppDomain.CurrentDomain.ProcessExit.Subscribe(fun _ -> GC.KeepAlive registry)
+            let stop = new System.Threading.CancellationTokenSource()
+            let worker = Task.Delay(System.Threading.Timeout.Infinite, stop.Token)
+            registry.Own { new IDisposable with
+                               member _.Dispose() =
+                                   subscription.Dispose()
+                                   stop.Cancel()
+                                   AppContext.SetData("MyDebugTools.test.partial.stopped", worker.IsCanceled)
+                                   stop.Dispose() }
+            failwith "fixture activation fault"
+
 let invoke (client: McpClient) name arguments = task {
     let! result = client.CallToolAsync(name, readOnlyDict arguments)
     return result.IsError.GetValueOrDefault(), (result.Content[0] :?> TextContentBlock).Text
@@ -91,4 +107,70 @@ let ``temporary installs restore pure disabled and enabled sources through the s
         Assert.Empty pending
     finally
         folder.Delete(true)
+}
+
+[<Fact>]
+let ``two rebuilds rollback failures and queued uninstall release old versions`` () = task {
+    let folder = Directory.CreateTempSubdirectory("MyDebugTools-replace-")
+    let output = Path.Combine(folder.FullName, "dev")
+    let id = "thirdparty.A"
+    try
+        use host = new Host()
+        host.Add { Id = "provider"; Title = ""; Core = true; Create = fun () -> Workbench() }
+        let catalog = LocalPlugins(host, Path.Combine(folder.FullName, "formal.json"))
+        let approved = TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously)
+        let waiting = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+        let mutable pause = false
+        let approve _ _ =
+            if pause then
+                waiting.TrySetResult() |> ignore
+                approved.Task
+            else Task.FromResult true
+        let commands = TemporaryCommands(catalog, (fun run -> run()), approve, (fun _ -> Task.FromResult true), ignore)
+        use server = new DeveloperServer(Path.Combine(folder.FullName, "dev.json"), "test", commands.Tools)
+        server.SetEnabled true
+        use! client = DeveloperServer.connect server.Configuration
+        let install () = invoke client "install_temporary" ["directory", box output]
+        let check revision =
+            Assert.Equal<string list>([$"A v{revision} · 请求 A"], Reload.results host)
+            let _, pending = catalog.CheckUnloads()
+            Assert.Empty pending
+        for revision in ["1"; "2"; "1"] do
+            Reload.buildThirdParty output "A" revision
+            let! error, message = install()
+            Assert.False(error, message)
+            check revision
+        let original = File.ReadAllText(Path.Combine(output, "plugin.json"))
+        let testAssembly = typeof<PartialActivation>.Assembly
+        File.Copy(testAssembly.Location, Path.Combine(output, "fixture.dll"))
+        let failures = [
+            "missing entry", fun m -> { m with EntryType = "Does.Not.Exist" }
+            "fixture activation fault", fun m -> { m with Assembly = "fixture.dll"; EntryType = typeof<PartialActivation>.FullName }
+        ]
+        for why, update in failures do
+            manifest output update
+            let! failed, reason = install()
+            Assert.True(failed, reason)
+            Assert.Contains(id, reason)
+            Assert.Contains("激活临时版", reason)
+            if why <> "missing entry" then
+                Assert.Contains(why, reason)
+                Assert.Equal(box true, AppContext.GetData("MyDebugTools.test.partial.stopped"))
+            Assert.DoesNotContain(host.Pages, fun p -> p.Id = "partial.page")
+            check "1"
+        File.WriteAllText(Path.Combine(output, "plugin.json"), original)
+        pause <- true
+        let replacing = install()
+        do! waiting.Task.WaitAsync(TimeSpan.FromSeconds 10.)
+        let removing = invoke client "uninstall_temporary" ["id", box id]
+        approved.SetResult(true)
+        let! replaced, detail = replacing
+        Assert.False(replaced, detail)
+        let! removed, detail = removing
+        Assert.False(removed, detail)
+        Assert.False(catalog.IsTemporary id)
+        Assert.Empty(Reload.results host)
+        let _, pending = catalog.CheckUnloads()
+        Assert.Empty pending
+    finally folder.Delete(true)
 }

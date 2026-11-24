@@ -7,4 +7,4 @@
 | [0008-01 连接本机宿主并读取开发文档](issues/01-local-docs.md) | 无 | 已完成 |
 | [0008-02 查询插件状态与界面扩展点](issues/02-inspect-plugins.md) | 0008-01 | 已完成 |
 | [0008-03 安装、接替与卸载临时插件](issues/03-temporary-plugin.md) | 0008-01 | 已完成 |
-| [0008-04 覆盖编译、再次安装与失败恢复](issues/04-replace-temporary.md) | 0008-03 | 待实施 |
+| [0008-04 覆盖编译、再次安装与失败恢复](issues/04-replace-temporary.md) | 0008-03 | 已完成，待统一验收 |
