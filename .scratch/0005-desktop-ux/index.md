@@ -43,7 +43,7 @@ Status: ready-for-agent
 | [0005-08 停靠、浮动与找回真实插件面板](issues/08-dock-plugin-panels.md) | 无 | 候选已接入，待浮窗与重载实测 |
 | [0005-09 保存并恢复工作区布局](issues/09-restore-dock-layout.md) | 08 | 已接入，待重启和多屏实测 |
 | [0005-10 查找导出并保住签名草稿](issues/10-export-signature-drafts.md) | 无 | 已实施，待统一验收 |
-| [0005-11 按签名调用并核对结果](issues/11-call-and-read-results.md) | 10 | 待开始 |
+| [0005-11 按签名调用并核对结果](issues/11-call-and-read-results.md) | 10 | 已实施，待统一验收 |
 | [0005-12 按可见预览复制和导出代码](issues/12-copy-binding-preview.md) | 无 | 待开始 |
 | [0005-13 从缺失依赖追到引用方](issues/13-trace-missing-dependency.md) | 无 | 待开始 |
 | [0005-14 选好函数和目标再开始监控](issues/14-prepare-api-monitor.md) | 无 | 待开始 |

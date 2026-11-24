@@ -164,7 +164,34 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                             selectEntry()
                         with e -> signatureStatus.Text <- e.Message))
                     panel.Children.Add signatureStatus
+                    let callFields = StackPanel(Spacing = 4.)
+                    let callContext = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
+                    let resultSummary = SelectableTextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
                     let output = TextBlock(TextWrapping = Avalonia.Media.TextWrapping.Wrap)
+                    let editArguments () =
+                        try
+                            let dll = image |> Option.defaultWith (fun () -> invalidOp "请先打开 DLL。")
+                            let signature = store.ConfirmedDraft(dll, editor.Read entry.Text)
+                            let values = System.Text.Json.Nodes.JsonNode.Parse(arguments.Text).AsObject()
+                            callFields.Children.Clear()
+                            for param in signature.Parameters do
+                                let input = TextBox()
+                                AutomationProperties.SetName(input, param.Name)
+                                let item = values[param.Name]
+                                if not (isNull item) then input.Text <- item.ToJsonString()
+                                callFields.Children.Add(TextBlock(Text = $"{param.Name} · {param.Type} · {param.Direction}（JSON 值）"))
+                                callFields.Children.Add input
+                                input.TextChanged.Add(fun _ ->
+                                    try
+                                        values[param.Name] <- System.Text.Json.Nodes.JsonNode.Parse(input.Text)
+                                        arguments.Text <- values.ToJsonString()
+                                        callContext.Text <- ""
+                                    with _ -> callContext.Text <- $"{param.Name} 需要有效的 JSON 值。")
+                        with e -> callContext.Text <- e.Message
+                    panel.Children.Add(button "按已确认签名填写" editArguments)
+                    panel.Children.Add callFields
+                    panel.Children.Add callContext
+                    entry.TextChanged.Add(fun _ -> callFields.Children.Clear())
                     panel.Children.Add(TextBlock(Text = "调用参数（JSON 对象，如 {\"a\":2,\"b\":3}）"))
                     panel.Children.Add arguments
                     let invoke () =
@@ -181,15 +208,28 @@ let plugin (window: Window) (host: Host) (requests: IObservable<string * string 
                                         let active = new CallSession(dll, target.DotNetPath)
                                         session <- Some active
                                         active
-                                let! result = worker.Invoke(saved, arguments.Text)
+                                let actual = arguments.Text
+                                callContext.Text <- $"{IO.Path.GetFileName dll.Path} · {saved.Entry} · 实参 {actual}"
+                                let! result = worker.Invoke(saved, actual)
+                                let outputs = result.Outputs |> Seq.map (fun kv -> $"{kv.Key} = {kv.Value}") |> String.concat "、"
+                                resultSummary.Text <- $"返回值 · {result.Result}　输出参数 · {outputs}"
                                 output.Text <- result.Display()
-                            with e -> output.Text <- e.Message
+                            with e -> resultSummary.Text <- ""; output.Text <- e.Message
                             panel.IsEnabled <- true
                         } |> ignore
                     panel.Children.Add(row [
                         button "调用函数" invoke
-                        button "重新开始会话" (fun () -> restart(); output.Text <- "已重新开始会话。")
+                        button "重新开始会话" (fun () ->
+                            let dialog = Window(Title = "重新开始会话", Width = 360., SizeToContent = SizeToContent.Height,
+                                                WindowStartupLocation = WindowStartupLocation.CenterOwner)
+                            let body = StackPanel(Spacing = 8., Margin = Avalonia.Thickness 16.)
+                            body.Children.Add(TextBlock(Text = "当前会话的句柄将失效。下次调用会创建新会话。", TextWrapping = Avalonia.Media.TextWrapping.Wrap))
+                            body.Children.Add(button "取消" (fun () -> dialog.Close()))
+                            body.Children.Add(button "确认重新开始" (fun () -> restart(); output.Text <- "已重新开始会话。"; dialog.Close()))
+                            dialog.Content <- body
+                            dialog.ShowDialog(window) |> ignore)
                     ])
+                    panel.Children.Add resultSummary
                     panel.Children.Add output
                     panel.Children.Add bindings.Control
                     let tabItem title (content: Control) =
