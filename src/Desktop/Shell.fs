@@ -134,6 +134,9 @@ type MainWindow() as window =
     let pageArea = ContentControl(Margin = Thickness 24.)
     let manager = StackPanel(Spacing = 12.)
     let feedback = TextBlock(TextWrapping = Media.TextWrapping.Wrap)
+    let managerDiagnostic = DiagnosticPanel()
+    let filter = TextBox(PlaceholderText = "按插件名称查找")
+    let rows = StackPanel(Spacing = 4.)
     let mutable closeAfterChange = false
     let mutable current = "core.home"
     let dllRequests = Event<string * string option>()
@@ -141,8 +144,8 @@ type MainWindow() as window =
     let homeMessage = TextBlock(TextWrapping = Media.TextWrapping.Wrap)
     let mutable opening = false
 
-    let confirmStop target = task {
-        let dialog = Window(Title = "停用监控插件", Width = 460., Height = 180.,
+    let confirmStop target verb = task {
+        let dialog = Window(Title = verb + "插件", Width = 460., Height = 180.,
                             WindowStartupLocation = WindowStartupLocation.CenterOwner)
         dialog.Content <- StackPanel.create [
             StackPanel.margin 16.
@@ -150,7 +153,7 @@ type MainWindow() as window =
             StackPanel.children [
                 TextBlock.create [ TextBlock.text $"正在采集：{target}" ]
                 button "继续监控" (fun () -> dialog.Close(false))
-                button "结束监控并停用" (fun () -> dialog.Close(true))
+                button ("结束采集并" + verb) (fun () -> dialog.Close(true))
             ]
         ] |> VirtualDom.create
         return! dialog.ShowDialog<bool>(window)
@@ -212,7 +215,7 @@ type MainWindow() as window =
                         | Some session ->
                             match session.Target() with
                             | Some target ->
-                                let! stop = confirmStop target
+                                let! stop = confirmStop target (if reload then "重新加载" else "停用")
                                 if stop then do! session.Stop()
                                 return stop
                             | None -> return true
@@ -237,9 +240,13 @@ type MainWindow() as window =
     and addDirectory path =
         try
             catalog.AddDirectory path
+            filter.Text <- catalog.TitleAt path
+            managerDiagnostic.Clear()
             folderInput.Text <- ""
             feedback.Text <- ""
-        with e -> feedback.Text <- e.Message
+        with e ->
+            feedback.Text <- $"无法关联目录。请检查路径和 plugin.json。{e.Message}"
+            managerDiagnostic.Show("插件管理", "关联开发目录", string path, e.Message)
         refresh()
 
     and refresh () =
@@ -275,50 +282,75 @@ type MainWindow() as window =
             "请求", ["web.api"], "web.api", "" ]
         home.Children.Add homeMessage
         manager.Children.Clear()
-        let view = StackPanel.create [
-            StackPanel.spacing 12.
-            StackPanel.children [
-                StackPanel.create [
-                    StackPanel.orientation Orientation.Horizontal
-                    StackPanel.spacing 8.
-                    StackPanel.children [
-                        button "添加目录" (fun () -> addDirectory folderInput.Text)
-                        button "浏览目录…" (fun () ->
-                            task {
-                                let! folders = window.StorageProvider.OpenFolderPickerAsync(FolderPickerOpenOptions(Title = "选择插件编译目录"))
-                                if folders.Count > 0 then addDirectory (folders[0].TryGetLocalPath())
-                            } |> ignore)
-                        button "检查卸载" (fun () ->
-                            let count, pending = catalog.CheckUnloads()
-                            let waiting = String.concat "、" pending
-                            let status = if waiting = "" then "无" else waiting
-                            feedback.Text <- $"已回收 {count} 个旧版本。仍待回收：{status}")
-                    ]
-                ]
-                for plugin in host.Plugins do
-                    let enabled = host.Enabled plugin.Id
-                    let state = if plugin.Core then "核心 · 固定加载" elif enabled then "普通 · 已启用" else "普通 · 已停用"
-                    StackPanel.create [
-                        StackPanel.orientation Orientation.Horizontal
-                        StackPanel.spacing 16.
-                        StackPanel.children [
-                            TextBlock.create [ TextBlock.verticalAlignment VerticalAlignment.Center; TextBlock.text (if plugin.Id.StartsWith("sample.") then $"{plugin.Title}（示例）　{state}" else $"{plugin.Title}　{state}") ]
-                            if not plugin.Core then
-                                let verb = if enabled then "停用" else "启用"
-                                button $"{verb} {plugin.Title}" (fun () -> change plugin.Id false)
-                                if enabled && (catalog.Directory plugin.Id).IsSome then
-                                    button $"重新加载 {plugin.Title}" (fun () -> change plugin.Id true)
-                        ]
-                    ]
-                    for reason in host.Mismatches plugin.Id do
-                        TextBlock.create [ TextBlock.text reason; TextBlock.textWrapping Media.TextWrapping.Wrap ]
-            ]
-        ]
+        let addButton (parent: Panel) title run =
+            parent.Children.Add(button title run |> VirtualDom.create)
         manager.Children.Add(TextBlock(Text = "插件管理", FontSize = 24.))
+        manager.Children.Add(TextBlock(Text = "本地插件编译目录"))
         manager.Children.Add folderInput
-        manager.Children.Add(VirtualDom.create view)
+        let tools = WrapPanel()
+        addButton tools "添加目录" (fun () -> addDirectory folderInput.Text)
+        addButton tools "关联开发目录…" (fun () ->
+            task {
+                let! folders = window.StorageProvider.OpenFolderPickerAsync(FolderPickerOpenOptions(Title = "选择插件编译目录"))
+                if folders.Count > 0 then addDirectory (folders[0].TryGetLocalPath())
+            } |> ignore)
+        manager.Children.Add tools
         manager.Children.Add feedback
+        manager.Children.Add managerDiagnostic.Control
+        let checks = StackPanel(Spacing = 4.)
+        addButton checks "检查卸载" (fun () ->
+            let count, pending = catalog.CheckUnloads()
+            let waiting = if pending.IsEmpty then "无" else String.concat "、" pending
+            feedback.Text <- $"已回收 {count} 个旧版本。仍待回收：{waiting}"
+            managerDiagnostic.Show("插件管理", "检查卸载", "旧插件程序集", feedback.Text))
+        manager.Children.Add(Expander(Header = "卸载诊断", Content = checks))
+        manager.Children.Add(TextBlock(Text = "查找插件"))
+        manager.Children.Add filter
+        manager.Children.Add rows
+        renderRows()
         navigate (if pages |> List.exists (fun p -> p.Id = current) then current else "core.manager")
+
+    and renderRows () =
+        rows.Children.Clear()
+        let wide = window.ClientSize.Width >= 760.
+        let columns = if wide then "2*,*,*,*,2*" else "2*,*,2*"
+        let field (grid: Grid) col (control: Control) =
+            Grid.SetColumn(control, col)
+            grid.Children.Add control
+        let grid () = Grid(ColumnDefinitions = ColumnDefinitions(columns), ColumnSpacing = 8.)
+        let heading = grid()
+        let titles = if wide then ["名称 / 用途"; "来源"; "版本"; "状态"; "操作"] else ["名称"; "状态"; "操作"]
+        titles |> List.iteri (fun i s -> field heading i (TextBlock(Text = s)))
+        rows.Children.Add heading
+        let query = string filter.Text
+        for plugin in host.Plugins do
+            if plugin.Title.Contains(query, StringComparison.OrdinalIgnoreCase) || plugin.Id.Contains(query, StringComparison.OrdinalIgnoreCase) then
+                let row = grid()
+                let enabled = host.Enabled plugin.Id
+                let source = if plugin.Core then "随附核心" else catalog.Source plugin.Id
+                let state = if plugin.Core then "固定加载" elif enabled then "已启用" else "已停用"
+                let name = if plugin.Id.StartsWith("sample.") then plugin.Title + "（示例）" else plugin.Title
+                let path = catalog.Directory plugin.Id |> Option.defaultValue "宿主内置"
+                let version = catalog.Version plugin.Id
+                let details = TextBox(IsReadOnly = true, TextWrapping = Media.TextWrapping.Wrap,
+                                      Text = $"{plugin.Id} · {source} · 版本 {version}\n{path}")
+                field row 0 (Expander(Header = name, Content = details))
+                if wide then
+                    field row 1 (TextBlock(Text = source))
+                    field row 2 (TextBlock(Text = version))
+                field row (if wide then 3 else 1) (TextBlock(Text = state))
+                let commands = WrapPanel()
+                if not plugin.Core then
+                    let verb = if enabled then "停用" else "启用"
+                    addAction commands $"{verb} {plugin.Title}" (fun () -> change plugin.Id false)
+                    if enabled && (catalog.Directory plugin.Id).IsSome then
+                        addAction commands $"重新加载 {plugin.Title}" (fun () -> change plugin.Id true)
+                field row (if wide then 4 else 2) commands
+                rows.Children.Add row
+                for reason in host.Mismatches plugin.Id do rows.Children.Add(TextBlock(Text = reason, TextWrapping = Media.TextWrapping.Wrap))
+
+    and addAction (panel: Panel) label run =
+        panel.Children.Add(button label run |> VirtualDom.create)
 
     do
         let corePage (page: Page) =
@@ -364,4 +396,8 @@ type MainWindow() as window =
             clearMenu actionsMenu actionHandlers
             (host :> IDisposable).Dispose()
             catalog.CheckUnloads() |> ignore)
+        AutomationProperties.SetName(filter, "查找插件")
+        filter.TextChanged.Add(fun _ -> renderRows())
+        window.SizeChanged.Add(fun e ->
+            if (e.PreviousSize.Width >= 760.) <> (e.NewSize.Width >= 760.) then renderRows())
         refresh()

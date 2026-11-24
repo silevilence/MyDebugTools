@@ -10,7 +10,7 @@ open System.Threading.Tasks
 open MyDebugTools.Contracts
 
 [<CLIMutable>]
-type PluginManifest = { Id: string; Title: string; Assembly: string; EntryType: string }
+type PluginManifest = { Id: string; Title: string; Assembly: string; EntryType: string; Version: string }
 
 type private PluginContext(entry: string) =
     inherit AssemblyLoadContext(Path.GetFileNameWithoutExtension entry, true)
@@ -41,6 +41,8 @@ type private Retired = { Id: string; Context: WeakReference; Snapshot: Directory
 
 type LocalPlugins(host: Host, settingsFile: string) =
     let locations = Dictionary<string, string>()
+    let bundled = HashSet<string>()
+    let versions = Dictionary<string, string>()
     let retired = ResizeArray<Retired>()
     let mutable collectedSinceCheck = 0
     let options = EnumerationOptions(RecurseSubdirectories = true, IgnoreInaccessible = false,
@@ -107,18 +109,33 @@ type LocalPlugins(host: Host, settingsFile: string) =
             Create = fun () -> { new IDesktopPlugin with member _.Activate reg = activate (copyOutput folder info.Id) reg }
         }
         locations.Add(info.Id, folder)
+        versions[info.Id] <- info.Version
 
     let savedPaths () =
         if File.Exists settingsFile then JsonSerializer.Deserialize<string array>(File.ReadAllText settingsFile)
         else [||]
 
-    member _.AddBundled(folder) = attach folder (manifest folder)
+    member _.AddBundled(folder) =
+        let info = manifest folder
+        attach folder info
+        bundled.Add info.Id |> ignore
+
+    member _.Source(id) =
+        if locations.ContainsKey id && not (bundled.Contains id) then "外部开发目录"
+        else "随附普通"
+
+    member _.Version(id) =
+        match versions.TryGetValue id with
+        | true, v when not (String.IsNullOrWhiteSpace v) -> v
+        | _ -> "未知"
 
     member _.Restore() = [
         for path in savedPaths() do
             try attach path (manifest path)
             with e -> yield $"{path}：{e.Message}"
     ]
+
+    member _.TitleAt(path) = (manifest path).Title
 
     member _.AddDirectory(path) =
         let folder = DirectoryInfo(path).FullName
@@ -149,6 +166,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
                 host.Enable(id, fun registry ->
                     transferred <- true
                     activate (snapshot, info) registry)
+                versions[id] <- info.Version
             finally
                 if not transferred then snapshot.Delete(true)
         | _ ->
