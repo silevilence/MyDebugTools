@@ -144,10 +144,14 @@ type LocalPlugins(host: Host, settingsFile: string) =
         for item in readPackages() do
             try
                 let folder = packageFolder item
-                let m = manifest folder
-                if m.Id <> item.Id then invalidOp "安装包标识与登记不符"
-                attach folder m
-                packages.Add(m.Id, item)
+                if item.PendingRemoval then
+                    host.Add { Id = item.Id; Title = item.Id; Core = false; Create = fun () -> invalidOp "请先完成卸载" }
+                    locations.Add(item.Id, folder)
+                else
+                    let m = manifest folder
+                    if m.Id <> item.Id then invalidOp "安装包标识与登记不符"
+                    attach folder m
+                packages.Add(item.Id, item)
             with e -> yield $"{item.Id}：{e.Message}"
         for path in savedPaths() do
             try attach path (manifest path)
@@ -156,6 +160,35 @@ type LocalPlugins(host: Host, settingsFile: string) =
 
     member _.Package id =
         match packages.TryGetValue id with true, item -> Some item | _ -> None
+
+    member _.RemoveExternal(id, detached: unit -> unit) =
+        use guard = lockCatalog()
+        if bundled.Contains id || not (locations.ContainsKey id) then invalidOp "只能移除外部插件"
+        host.Disable id
+        detached()
+        match packages.TryGetValue id with
+        | true, item ->
+            let items = readPackages()
+            if not (items |> Array.contains item) then invalidOp "安装记录已变化。"
+            let pending = { item with PendingRemoval = true }
+            savePackages (items |> Array.map (fun x -> if x.Id = id then pending else x))
+            packages[id] <- pending
+            let folder = packageFolder item
+            if Directory.Exists folder then Directory.Delete(folder, true)
+            savePackages (items |> Array.filter (fun x -> x.Id <> id))
+            packages.Remove id |> ignore
+        | _ ->
+            let folder = locations[id]
+            let saved = savedPaths() |> Array.filter (fun path -> not (String.Equals(path, folder, StringComparison.OrdinalIgnoreCase)))
+            let temp = settingsFile + "." + Guid.NewGuid().ToString("N")
+            try
+                File.WriteAllText(temp, JsonSerializer.Serialize saved)
+                File.Move(temp, settingsFile, true)
+            finally
+                if File.Exists temp then File.Delete temp
+        host.Remove id
+        locations.Remove id |> ignore
+        manifests.Remove id |> ignore
 
     member _.Replace(preview: PackagePreview, detached: unit -> unit) =
         use guard = lockCatalog()
@@ -201,7 +234,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
         | Some _ -> invalidOp "同 ID 的包已安装。请确认替换版本。"
         | None ->
             if host.Plugins |> List.exists (fun p -> p.Id = id) then invalidOp $"与现有插件 ID 冲突：{id}"
-            let item = { Id = id; Folder = Guid.NewGuid().ToString("N"); Hash = preview.Hash; Source = preview.Source }
+            let item = { Id = id; Folder = Guid.NewGuid().ToString("N"); Hash = preview.Hash; Source = preview.Source; PendingRemoval = false }
             let folder = packageFolder item
             Directory.CreateDirectory folder |> ignore
             let mutable attached = false
@@ -250,6 +283,7 @@ type LocalPlugins(host: Host, settingsFile: string) =
     // Copy privately on a worker before releasing the current version on the UI
     // thread. Page factories and registration continue to run on the UI thread.
     member _.EnableAsync(id, detach: unit -> unit) = task {
+        if packages.ContainsKey id && packages[id].PendingRemoval then invalidOp "请先完成卸载"
         match locations.TryGetValue id with
         | true, folder ->
             let! snapshot, info = Task.Run(fun () -> copyOutput folder id)

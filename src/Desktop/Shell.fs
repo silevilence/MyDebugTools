@@ -416,6 +416,44 @@ type MainWindow() as window =
                     addAction commands $"{verb} {plugin.Title}" (fun () -> change plugin.Id false)
                     if enabled && (catalog.Directory plugin.Id).IsSome then
                         addAction commands $"重新加载 {plugin.Title}" (fun () -> change plugin.Id true)
+                if source.StartsWith("外部") then
+                    let package = catalog.Package plugin.Id
+                    let verb =
+                        match package with
+                        | Some item when item.PendingRemoval -> "重试卸载插件"
+                        | Some _ -> "卸载插件"
+                        | None -> "解除目录关联"
+                    addAction commands (verb + "…") (fun () ->
+                        task {
+                            try
+                                let dialog = Window(Title = verb, Width = 460., SizeToContent = SizeToContent.Height,
+                                                    WindowStartupLocation = WindowStartupLocation.CenterOwner)
+                                let body = StackPanel(Spacing = 8., Margin = Thickness 16.)
+                                let scope = if package.IsSome then "清理受管副本" else "保留编译目录"
+                                let affected = List.append pages (List.map snd targets) |> String.concat "、"
+                                body.Children.Add(TextBlock(Text = $"{plugin.Title} · {plugin.Id}\\n界面与扩展 · {affected}\\n{scope} · {path}", TextWrapping = Media.TextWrapping.Wrap))
+                                addAction body "取消" (fun () -> dialog.Close(false))
+                                addAction body ("确认" + verb) (fun () -> dialog.Close(true))
+                                dialog.Content <- body
+                                let! ok = dialog.ShowDialog<bool>(window)
+                                if ok then
+                                    let! proceed = task {
+                                        match host.Monitor plugin.Id with
+                                        | Some session when (session.Target()).IsSome ->
+                                            let! stop = confirmStop (session.Target() |> Option.defaultValue "") verb
+                                            if stop then do! session.Stop()
+                                            return stop
+                                        | _ -> return true
+                                    }
+                                    if proceed then
+                                        catalog.RemoveExternal(plugin.Id, refresh)
+                                        filter.Text <- ""
+                                        feedback.Text <- $"已{verb} · {plugin.Title}"
+                            with e ->
+                                feedback.Text <- $"{verb}未完成 · {path} · {e.Message}。处理后可重试。"
+                                managerDiagnostic.Show("插件管理", verb, plugin.Id, e.Message)
+                            refresh()
+                        } |> ignore)
                 field row (if wide then 4 else 2) commands
                 rows.Children.Add row
                 for reason in host.Mismatches plugin.Id do rows.Children.Add(TextBlock(Text = reason, TextWrapping = Media.TextWrapping.Wrap))

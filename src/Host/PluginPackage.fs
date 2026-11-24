@@ -13,7 +13,7 @@ type PluginExtensionInfo = { PageId: string; Title: string }
 type PluginManifest = { Id: string; Title: string; Assembly: string; EntryType: string; Version: string; Pages: string array; Extensions: PluginExtensionInfo array }
 
 [<CLIMutable>]
-type InstalledPackage = { Id: string; Hash: string; Folder: string; Source: string }
+type InstalledPackage = { Id: string; Hash: string; Folder: string; Source: string; PendingRemoval: bool }
 
 type PackagePreview = { Manifest: PluginManifest; Hash: string; Source: string }
 

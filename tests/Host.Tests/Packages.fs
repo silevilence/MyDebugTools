@@ -38,6 +38,15 @@ let ``install is repeatable and survives reopening the catalog`` () =
         let reopened = LocalPlugins(restored, settings)
         Assert.Empty(reopened.Restore())
         Assert.Equal("外部 ZIP", reopened.Source preview.Manifest.Id)
+        let installed = (reopened.Directory preview.Manifest.Id).Value
+        reopened.RemoveExternal(preview.Manifest.Id, ignore)
+        Assert.False(Directory.Exists installed)
+        Assert.Empty(restored.Plugins)
+        reopened.AddDirectory build
+        reopened.RemoveExternal(preview.Manifest.Id, ignore)
+        Assert.True(File.Exists(Path.Combine(build, "plugin.json")))
         Assert.True(File.Exists zip)
+        Assert.Empty(reopened.Restore())
+        Assert.Empty(restored.Plugins)
     finally
         temp.Delete(true)
