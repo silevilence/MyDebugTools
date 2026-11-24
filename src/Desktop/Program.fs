@@ -7,7 +7,9 @@ open Avalonia.Themes.Fluent
 
 type App() =
     inherit Application()
-    override this.Initialize() = this.Styles.Add(FluentTheme())
+    override this.Initialize() =
+        this.Styles.Add(FluentTheme())
+        this.Styles.Add(Dock.Avalonia.Themes.Fluent.DockFluentTheme())
     override this.OnFrameworkInitializationCompleted() =
         match this.ApplicationLifetime with
         | :? IClassicDesktopStyleApplicationLifetime as lifetime -> lifetime.MainWindow <- Shell.MainWindow()

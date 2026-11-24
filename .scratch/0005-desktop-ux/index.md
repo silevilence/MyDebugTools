@@ -21,7 +21,7 @@ Status: ready-for-agent
 | 共用视觉样式、主题、窗口尺寸与键盘路径 | 待开始 | I |
 | 全部插件表格、界面提供方与扩展层级 | 已实施，待统一验收 | G、J |
 | 外部 ZIP 加载、换版、卸载与开发目录解除关联 | 已实施，待统一验收 | G、K |
-| 主工作区、停靠、浮动、视图菜单和布局恢复 | 待开始 | I、L |
+| 主工作区、停靠、浮动、视图菜单和布局恢复 | 候选已接入，待浮窗与重载实测 | I、L |
 | 连续操作中的草稿、选择、结果归属与对照 | 待开始 | C–F、M |
 | 发布版回归与首次使用者任务 | 待开始 | A–M、四张任务卡 |
 
@@ -40,7 +40,7 @@ Status: ready-for-agent
 | [0005-05 从 ZIP 加载外部插件](issues/05-load-plugin-zip.md) | 03 | 已实施，待统一验收 |
 | [0005-06 更换外部插件版本](issues/06-replace-plugin-zip.md) | 05 | 已实施，待统一验收 |
 | [0005-07 卸载外部包与解除目录关联](issues/07-remove-external-plugin.md) | 05 | 已实施，待统一验收 |
-| [0005-08 停靠、浮动与找回真实插件面板](issues/08-dock-plugin-panels.md) | 无 | 待开始 |
+| [0005-08 停靠、浮动与找回真实插件面板](issues/08-dock-plugin-panels.md) | 无 | 候选已接入，待浮窗与重载实测 |
 | [0005-09 保存并恢复工作区布局](issues/09-restore-dock-layout.md) | 08 | 待开始 |
 | [0005-10 查找导出并保住签名草稿](issues/10-export-signature-drafts.md) | 无 | 待开始 |
 | [0005-11 按签名调用并核对结果](issues/11-call-and-read-results.md) | 10 | 待开始 |

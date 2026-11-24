@@ -131,7 +131,9 @@ type MainWindow() as window =
         handlers.Clear()
         menu.Items.Clear()
     let actionResult = TextBlock(Margin = Thickness(24., 0., 24., 8.))
-    let pageArea = ContentControl(Margin = Thickness 24.)
+    let workspace = Workspace()
+    let pageArea = workspace.Control
+    let views = ShellMenuItem("视图")
     let manager = StackPanel(Spacing = 12.)
     let feedback = TextBlock(TextWrapping = Media.TextWrapping.Wrap)
     let managerDiagnostic = DiagnosticPanel()
@@ -179,11 +181,11 @@ type MainWindow() as window =
             item.FontWeight <- if unbox<string> item.Tag = id then Media.FontWeight.Bold else Media.FontWeight.Normal
         let page = host.Pages |> List.find (fun p -> p.Id = id)
         match cache.TryGetValue id with
-        | true, control -> pageArea.Content <- control
+        | true, control -> workspace.Show(id, page.Title, control)
         | _ ->
             let control = page.Create()
             cache.Add(id, control)
-            pageArea.Content <- control
+            workspace.Show(id, page.Title, control)
 
     and openTask plugins destination tab file =
         if not opening then
@@ -253,7 +255,9 @@ type MainWindow() as window =
     and refresh () =
         let pages = host.Pages
         for id in cache.Keys |> Seq.toArray do
-            if pages |> List.exists (fun p -> p.Id = id) |> not then cache.Remove id |> ignore
+            if pages |> List.exists (fun p -> p.Id = id) |> not then
+                workspace.Remove id
+                cache.Remove id |> ignore
         clearMenu menu navigationHandlers
         for page in pages do
             let item = ShellMenuItem(page.Title)
@@ -261,6 +265,18 @@ type MainWindow() as window =
             item.Tag <- pageId
             navigationHandlers.Add(item.Click.Subscribe(fun _ -> navigate pageId))
             menu.Items.Add item |> ignore
+        views.Items.Clear()
+        for page in pages do
+            let item = ShellMenuItem(page.Title, ToggleType = MenuItemToggleType.CheckBox, IsChecked = workspace.IsOpen page.Id)
+            navigationHandlers.Add(item.Click.Subscribe(fun _ ->
+                if workspace.IsOpen page.Id then workspace.Move(page.Id, "隐藏")
+                else navigate page.Id))
+            views.Items.Add item |> ignore
+        for title, action in ["向左停靠","Left"; "向右停靠","Right"; "向上停靠","Top"; "向下停靠","Bottom"; "合并标签","合并标签"; "浮动","浮动"; "隐藏","隐藏"] do
+            let item = ShellMenuItem(title)
+            navigationHandlers.Add(item.Click.Subscribe(fun _ -> workspace.Move(current, action)))
+            views.Items.Add item |> ignore
+        menu.Items.Add views |> ignore
         home.Children.Clear()
         home.Children.Add(TextBlock(Text = "开始调试", FontSize = 24.))
         let group title description entries =
@@ -467,6 +483,13 @@ type MainWindow() as window =
                 Id = page.Id; Title = page.Title; Core = true
                 Create = fun () -> { new IDesktopPlugin with member _.Activate reg = reg.Page page }
             }
+        workspace.Focused.Add(fun id ->
+            if current <> id then
+                current <- id
+                Avalonia.Threading.Dispatcher.UIThread.Post(fun () ->
+                    if current = id && workspace.IsOpen id then navigate id))
+        views.SubmenuOpened.Add(fun _ ->
+            for page, item in Seq.zip host.Pages (views.Items |> Seq.cast<MenuItem>) do item.IsChecked <- workspace.IsOpen page.Id)
         pageArea.Focusable <- true
         corePage { Id = "core.home"; Title = "首页"; Create = fun () -> ScrollViewer(Content = home) }
         corePage { Id = "core.manager"; Title = "插件管理"; Create = fun () -> ScrollViewer(Content = manager) }
@@ -499,7 +522,7 @@ type MainWindow() as window =
                 e.Cancel <- true
                 closeAfterChange <- true)
         window.Closed.Add(fun _ ->
-            pageArea.Content <- null
+            for id in cache.Keys do workspace.Remove id
             cache.Clear()
             clearMenu menu navigationHandlers
             clearMenu actionsMenu actionHandlers
