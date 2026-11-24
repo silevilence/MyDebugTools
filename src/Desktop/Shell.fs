@@ -47,32 +47,74 @@ type private ShellMenuItem(title: string) =
 let private button (label: string) (run: unit -> unit) =
     Button.create [ Button.content label; Button.onClick (fun _ -> run()) ]
 
-let private targets (window: Window) (host: Host) () =
-    let result = TextBlock(Text = "宿主 x64", TextWrapping = Media.TextWrapping.Wrap)
-    let show source =
-        try
-            let target = Targets.resolve (source())
-            host.Target <- Some target
-            let arch = if target.Architecture = X64 then "x64" else "x86"
-            result.Text <- $"目标 {arch} · {target.DotNetPath}"
-        with e ->
-            host.Target <- None
-            result.Text <- e.Message
+let private targets (window: Window) (host: Host) openTask () =
+    let active = TextBlock(Text = "当前目标 · 尚未选择", TextWrapping = Media.TextWrapping.Wrap)
+    let feedback = TextBlock(TextWrapping = Media.TextWrapping.Wrap)
+    let diagnostics = DiagnosticPanel()
     let pid = TextBox(PlaceholderText = "进程 ID")
-    StackPanel.create [
-        StackPanel.spacing 12.
-        StackPanel.children [
-            TextBlock.create [ TextBlock.text "调试目标"; TextBlock.fontSize 24. ]
-            button "选择目标 DLL" (fun () ->
-                task {
-                    let! files = window.StorageProvider.OpenFilePickerAsync(FilePickerOpenOptions(Title = "选择目标 DLL"))
-                    if files.Count > 0 then show (fun () -> DllFile (files[0].TryGetLocalPath()))
-                } |> ignore)
-            ContentControl.create [ ContentControl.content pid ]
-            button "选择目标进程" (fun () -> show (fun () -> ProcessId (Int32.Parse pid.Text)))
-            ContentControl.create [ ContentControl.content result ]
-        ]
-    ] |> VirtualDom.create
+    AutomationProperties.SetName(pid, "进程 ID")
+    let file = TextBox(PlaceholderText = "DLL 文件路径")
+    AutomationProperties.SetName(file, "目标 DLL 路径")
+    let next = Button(IsVisible = false)
+    let show action subject source =
+        try
+            let target, runtime = Targets.inspect (source())
+            let name =
+                match target.Source with
+                | DllFile path -> Path.GetFileName path
+                | ProcessId id ->
+                    use proc = Diagnostics.Process.GetProcessById id
+                    $"{proc.ProcessName} · PID {id}"
+            host.Target <- Some target
+            active.Text <- $"当前目标 · {name} · 目标 {target.Architecture} · 宿主 {Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}"
+            feedback.Text <- if runtime then "所需运行时已安装。" else $"执行需要 .NET 10 {target.Architecture} 运行时。可以继续静态浏览。"
+            diagnostics.Clear()
+            next.Content <- match target.Source with DllFile _ -> "在 DLL 工作台打开" | ProcessId _ -> "进入监控准备"
+            next.IsVisible <- true
+        with e ->
+            feedback.Text <-
+                match e with
+                | :? IO.FileNotFoundException | :? IO.DirectoryNotFoundException -> "文件不存在。请检查路径或重新选择 DLL。"
+                | :? ComponentModel.Win32Exception as err when err.NativeErrorCode = 87 -> "进程已退出或不存在。请重新选择进程。"
+                | :? BadImageFormatException -> "文件不是可识别的 DLL。请重新选择。"
+                | _ -> e.Message
+            diagnostics.Show("调试目标", action, subject, feedback.Text + Environment.NewLine + e.Message)
+            if action = "选择进程" then pid.Focus() |> ignore
+    let openFile path =
+        show "选择文件" (string path) (fun () ->
+            if String.IsNullOrWhiteSpace path then invalidOp "请填写 DLL 文件路径。"
+            DllFile(Path.GetFullPath path))
+    next.Click.Add(fun _ ->
+        match host.Target |> Option.map _.Source with
+        | Some (DllFile path) -> openTask ["dll.debugger"] "dll.debugger" "导出" (Some path)
+        | Some (ProcessId _) -> openTask ["api.monitor"] "api.monitor" "" None
+        | None -> ())
+    let panel = StackPanel(Spacing = 8.)
+    let addButton label run = panel.Children.Add(button label run |> VirtualDom.create)
+    panel.Children.Add(TextBlock(Text = "调试目标", FontSize = 24.))
+    panel.Children.Add active
+    panel.Children.Add next
+    panel.Children.Add(TextBlock(Text = "DLL 文件路径"))
+    panel.Children.Add file
+    addButton "选择目标 DLL" (fun () -> openFile file.Text)
+    addButton "浏览 DLL…" (fun () ->
+        task {
+            let! files = window.StorageProvider.OpenFilePickerAsync(FilePickerOpenOptions(Title = "选择目标 DLL"))
+            if files.Count > 0 then
+                file.Text <- files[0].TryGetLocalPath()
+                openFile file.Text
+        } |> ignore)
+    panel.Children.Add(TextBlock(Text = "进程 ID"))
+    panel.Children.Add pid
+    addButton "选择目标进程" (fun () ->
+        show "选择进程" ("PID " + string pid.Text) (fun () ->
+            if String.IsNullOrWhiteSpace pid.Text then invalidOp "请输入大于 0 的进程 ID。"
+            match Int32.TryParse pid.Text with
+            | true, id when id > 0 -> ProcessId id
+            | _ -> invalidOp "进程 ID 须为大于 0 的整数。请修改后重试。"))
+    panel.Children.Add feedback
+    panel.Children.Add diagnostics.Control
+    ScrollViewer(Content = panel) :> Control
 
 type MainWindow() as window =
     inherit Window(Title = "MyDebugTools", Width = 860., Height = 580., MinWidth = 580., MinHeight = 400.)
@@ -287,7 +329,7 @@ type MainWindow() as window =
         pageArea.Focusable <- true
         corePage { Id = "core.home"; Title = "首页"; Create = fun () -> ScrollViewer(Content = home) }
         corePage { Id = "core.manager"; Title = "插件管理"; Create = fun () -> ScrollViewer(Content = manager) }
-        corePage { Id = "core.targets"; Title = "调试目标"; Create = targets window host }
+        corePage { Id = "core.targets"; Title = "调试目标"; Create = targets window host openTask }
         host.Add { Id = "dll.debugger"; Title = "DLL 工作台"; Core = false; Create = fun () -> DllWorkbench.plugin window host dllRequests.Publish }
         host.Add { Id = "sample.workbench"; Title = "工作台"; Core = false; Create = fun () -> Workbench() }
         host.Add { Id = "sample.actions"; Title = "工作台扩展"; Core = false; Create = fun () -> WorkbenchActions() }

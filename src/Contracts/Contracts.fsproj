@@ -3,6 +3,7 @@
     <AssemblyName>MyDebugTools.Contracts</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Diagnostics.fs" />
     <Compile Include="Controls.fs" />
     <Compile Include="SyntaxEditor.fs" />
     <PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />

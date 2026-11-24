@@ -21,7 +21,7 @@ module private View =
         control.Click.Add(fun _ -> handler())
         control
 
-    let create () =
+    let create (target: unit -> DebugTarget option) () =
         let panel = StackPanel(Spacing = 8.)
         let query = input "搜索 SDK 函数"
         let dll = input "监控 DLL 路径"
@@ -110,6 +110,14 @@ module private View =
         let start = button "启动并监控" (fun () -> track (fun () ->
             CaptureSession.Launch(exe.Text, string args.Text, architecture (Targets.forFile exe.Text), selected)))
         let pid = input "目标进程 ID"
+        let mutable previousTarget = None
+        panel.AttachedToVisualTree.Add(fun _ ->
+            let currentTarget = target()
+            if currentTarget <> previousTarget then
+                previousTarget <- currentTarget
+                match currentTarget |> Option.map _.Source with
+                | Some (ProcessId id) -> pid.Text <- string id
+                | _ -> ())
         let attach = button "附加并监控" (fun () -> track (fun () ->
             let id = Int32.Parse pid.Text
             CaptureSession.Attach(id, architecture (Targets.forProcess id), selected)))
@@ -141,4 +149,4 @@ type Plugin() =
                               | all -> Some (all |> Array.map string |> String.concat "、")
                           Stop = stop }
             reg.Own { new IDisposable with member _.Dispose() = stop().GetAwaiter().GetResult() }
-            reg.Page { Id = "api.monitor"; Title = "API 监控"; Create = View.create }
+            reg.Page { Id = "api.monitor"; Title = "API 监控"; Create = View.create reg.CurrentTarget }

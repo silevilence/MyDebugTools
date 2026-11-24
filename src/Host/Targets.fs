@@ -38,7 +38,7 @@ let forProcess pid =
     let machine = if processMachine = 0us then nativeMachine else processMachine
     architecture (LanguagePrimitives.EnumOfValue machine)
 
-let resolve source =
+let inspect source =
     let arch =
         match source with
         | DllFile path -> forFile path
@@ -59,5 +59,9 @@ let resolve source =
     let available =
         File.Exists executable && Directory.Exists runtime &&
         (Directory.EnumerateDirectories(runtime, "10.*") |> Seq.isEmpty |> not)
-    if not available then invalidOp $"目标 {name} · 缺少 .NET 10 {name} 运行时"
-    { Source = source; Architecture = arch; DotNetPath = executable }
+    { Source = source; Architecture = arch; DotNetPath = executable }, available
+
+let resolve source =
+    let target, available = inspect source
+    if not available then invalidOp $"目标 {target.Architecture} · 缺少 .NET 10 {target.Architecture} 运行时"
+    target
